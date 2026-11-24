@@ -4,12 +4,14 @@
 #include <stddef.h>
 #include <time.h>
 
-#define CTI_VERSION "0.2.0"
+#define CTI_VERSION "0.3.0"
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_BUFFERS 32
 #define MAX_PLUGINS 32
 #define MAX_PLUGIN_CMDS 64
+#define MAX_PLUGIN_WORDS 1024
 #define MAX_OUTPUT_LINES 200
+#define MAX_AC_ITEMS 12
 
 typedef enum {
     KEY_NULL = 0,
@@ -29,6 +31,7 @@ typedef enum {
     KEY_SHIFT_TAB,
     KEY_F2,
     KEY_F5,
+    KEY_CTRL_SPACE,
     KEY_MOUSE
 } EditorKey;
 
@@ -50,6 +53,16 @@ typedef enum {
     SPLIT_VERT,
     SPLIT_HORIZ
 } SplitMode;
+
+typedef enum {
+    SYN_NONE = 0,
+    SYN_C,
+    SYN_PYTHON,
+    SYN_JAVA,
+    SYN_JS,
+    SYN_SHELL,
+    SYN_CONF
+} SyntaxLang;
 
 typedef enum {
     HL_NORMAL = 0,
@@ -106,6 +119,7 @@ typedef struct {
     char name[64];
     char url[256];
     int installed;
+    int is_builtin;
 } PluginSpec;
 
 typedef struct {
@@ -115,6 +129,12 @@ typedef struct {
 } PluginCommand;
 
 typedef struct {
+    char word[64];
+    char kind[16];
+    int lang_id; /* 0 = all */
+} PluginWord;
+
+typedef struct {
     char theme[32];
     int tab_size;
     int expand_tab;
@@ -122,6 +142,8 @@ typedef struct {
     int cursorline;
     int auto_indent;
     int auto_pairs;
+    int auto_complete;
+    int auto_lint;
     int mouse_enabled;
     int sidebar_open_on_start;
     int sidebar_width;
@@ -143,6 +165,8 @@ typedef struct {
     int hl_cap;
     int hl_open_comment;
     int bookmarked;
+    int diag_level; /* 0=none, 1=warn, 2=error */
+    char diag_msg[128];
 } Line;
 
 typedef enum {
@@ -175,6 +199,7 @@ typedef struct {
     int vis_sy;
     int dirty;
     int syntax_id;
+    int syntax_manual;
     int readonly;
     UndoAction *undo;
     int undo_len;
@@ -245,12 +270,25 @@ typedef struct {
     int pending_c;
     int pending_leader;
     int pending_f;
+    int pending_bracket_next;
+    int pending_bracket_prev;
     int quit_warn;
     MouseEvent last_mouse;
     Config cfg;
     Theme theme;
     PluginCommand plugin_cmds[MAX_PLUGIN_CMDS];
     int num_plugin_cmds;
+    PluginWord plugin_words[MAX_PLUGIN_WORDS];
+    int num_plugin_words;
+    /* Autocomplete popup state */
+    int ac_visible;
+    char ac_items[MAX_AC_ITEMS][64];
+    char ac_kinds[MAX_AC_ITEMS][16];
+    int ac_count;
+    int ac_sel;
+    int ac_prefix_len;
+    int ac_cursor_row;
+    int ac_cursor_col;
     int running;
 } EditorState;
 
@@ -300,6 +338,9 @@ void buf_raw_delete_at(Buffer *b, int row, int col, int len);
 
 /* syntax.c */
 int syntax_detect(const char *filename);
+int syntax_detect_from_content(Buffer *b);
+int syntax_id_from_name(const char *name);
+const char *syntax_name(int syntax_id);
 void syntax_update_line(Buffer *b, int row);
 void syntax_update_all(Buffer *b);
 Color syntax_color(HlType hl);
@@ -330,7 +371,9 @@ void plugins_install(void);
 void plugins_update(void);
 void plugins_clean(void);
 void plugins_status(void);
+void plugins_list_catalog(void);
 void plugins_add(const char *spec);
+void plugins_create(const char *name);
 int plugins_try_command(const char *cmd);
 
 /* tools.c */
@@ -351,5 +394,14 @@ void tools_move_lines(Buffer *b, int start_row, int end_row, int dir);
 void tools_toggle_bookmark(Buffer *b, int row);
 void tools_next_bookmark(Buffer *b);
 void tools_jump_grep_line(Buffer *b);
+void tools_lint_buffer(Buffer *b);
+void tools_next_diag(Buffer *b, int dir);
+void tools_format_buffer(Buffer *b);
+
+/* autocomplete.c */
+void ac_refresh(Buffer *b, int force);
+void ac_dismiss(void);
+void ac_move(int delta);
+void ac_accept(Buffer *b);
 
 #endif /* CATINGIRAN_STATE_H */

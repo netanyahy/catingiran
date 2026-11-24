@@ -383,21 +383,49 @@ static void handle_search_key(int key, int ulen, const char *ubuf) {
 
 static void handle_insert_key(int key, int ulen, const char *ubuf) {
     Buffer *b = &E.buffers[E.cur_buf];
+
+    if (key == KEY_CTRL_SPACE) {
+        ac_refresh(b, 1);
+        return;
+    }
+
     if (key == KEY_ESC) {
+        if (E.ac_visible) {
+            ac_dismiss();
+            return;
+        }
         E.mode = MODE_NORMAL;
         if (b->cx > 0) b->cx = utf8_prev_idx(b->lines[b->cy].chars, b->cx);
         clamp_cursor(b);
         return;
     }
 
+    if (E.ac_visible) {
+        if (key == KEY_ARROW_DOWN || key == KEY_TAB) {
+            ac_move(1);
+            return;
+        }
+        if (key == KEY_ARROW_UP || key == KEY_SHIFT_TAB) {
+            ac_move(-1);
+            return;
+        }
+        if (key == KEY_ENTER) {
+            ac_accept(b);
+            return;
+        }
+    }
+
     switch (key) {
         case KEY_ENTER:
+            ac_dismiss();
             buf_insert_newline(b);
             break;
         case KEY_BACKSPACE:
             buf_backspace(b);
+            ac_refresh(b, 0);
             break;
         case KEY_DEL:
+            ac_dismiss();
             buf_delete_at_cursor(b);
             break;
         case KEY_TAB:
@@ -413,31 +441,43 @@ static void handle_insert_key(int key, int ulen, const char *ubuf) {
             break;
         case CTRL_KEY('h'):
         case KEY_ARROW_LEFT:
+            ac_dismiss();
             move_cursor(b, KEY_ARROW_LEFT);
             break;
         case CTRL_KEY('j'):
         case KEY_ARROW_DOWN:
+            ac_dismiss();
             move_cursor(b, KEY_ARROW_DOWN);
             break;
         case CTRL_KEY('k'):
         case KEY_ARROW_UP:
+            ac_dismiss();
             move_cursor(b, KEY_ARROW_UP);
             break;
         case CTRL_KEY('l'):
         case KEY_ARROW_RIGHT:
+            ac_dismiss();
             move_cursor(b, KEY_ARROW_RIGHT);
             break;
         case KEY_HOME:
         case KEY_END:
         case KEY_PAGE_UP:
         case KEY_PAGE_DOWN:
+            ac_dismiss();
             move_cursor(b, key);
             break;
         default:
             if (ulen > 0 && (unsigned char)ubuf[0] >= 32 && key < 1000) {
                 if (E.cfg.auto_pairs && ulen == 1) {
+                    Line *cur_ln = &b->lines[b->cy];
+                    char ch = ubuf[0];
+                    if ((ch == ')' || ch == ']' || ch == '}' || ch == '"' || ch == '\'') &&
+                        b->cx < cur_ln->size && cur_ln->chars[b->cx] == ch) {
+                        b->cx++;
+                        break;
+                    }
                     const char *pair = NULL;
-                    switch (ubuf[0]) {
+                    switch (ch) {
                         case '(': pair = "()"; break;
                         case '[': pair = "[]"; break;
                         case '{': pair = "{}"; break;
@@ -445,12 +485,14 @@ static void handle_insert_key(int key, int ulen, const char *ubuf) {
                         case '\'': pair = "''"; break;
                     }
                     if (pair) {
+                        ac_dismiss();
                         buf_insert_bytes(b, pair, 2);
                         b->cx--;
                         break;
                     }
                 }
                 buf_insert_bytes(b, ubuf, ulen);
+                ac_refresh(b, 0);
             }
             break;
     }
@@ -545,7 +587,21 @@ static void handle_normal_key(int key, const char *ubuf) {
             char q[128] = {0};
             editor_prompt_input("Grep project: ", q, sizeof(q));
             if (q[0]) tools_grep(q);
+        } else if (key == 'm') {
+            tools_format_buffer(b);
         }
+        return;
+    }
+
+    if (E.pending_bracket_next) {
+        E.pending_bracket_next = 0;
+        if (key == 'd') tools_next_diag(b, 1);
+        return;
+    }
+
+    if (E.pending_bracket_prev) {
+        E.pending_bracket_prev = 0;
+        if (key == 'd') tools_next_diag(b, -1);
         return;
     }
 
@@ -778,6 +834,12 @@ static void handle_normal_key(int key, const char *ubuf) {
             break;
         case KEY_SHIFT_TAB:
             E.cur_buf = (E.cur_buf - 1 + E.num_buffers) % E.num_buffers;
+            break;
+        case ']':
+            E.pending_bracket_next = 1;
+            break;
+        case '[':
+            E.pending_bracket_prev = 1;
             break;
         case '>':
             buf_indent_line(b, b->cy, 1);

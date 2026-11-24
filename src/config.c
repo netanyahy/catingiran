@@ -36,12 +36,12 @@ static const Theme BUILTIN_THEMES[] = {
         .status_mode_bg = {230, 232, 238},
         .status_mode_fg = {18, 19, 23},
         .hl_comment = {104, 110, 124},
-        .hl_kw1 = {245, 245, 250},
-        .hl_kw2 = {180, 192, 208},
-        .hl_string = {175, 196, 174},
-        .hl_number = {212, 184, 152},
-        .hl_preproc = {188, 174, 204},
-        .hl_func = {174, 198, 224},
+        .hl_kw1 = {198, 160, 246},
+        .hl_kw2 = {249, 226, 175},
+        .hl_string = {166, 227, 161},
+        .hl_number = {250, 179, 135},
+        .hl_preproc = {243, 139, 168},
+        .hl_func = {137, 180, 250},
         .hl_match = {255, 215, 110}
     },
     /* 2. Obsidian (Pitch black + Gentoo violet accent) */
@@ -231,6 +231,8 @@ void config_init_defaults(Config *cfg) {
     cfg->cursorline = 1;
     cfg->auto_indent = 1;
     cfg->auto_pairs = 1;
+    cfg->auto_complete = 1;
+    cfg->auto_lint = 1;
     cfg->mouse_enabled = 1;
     cfg->sidebar_open_on_start = 1;
     cfg->sidebar_width = 28;
@@ -279,24 +281,39 @@ void config_get_user_path(char *buf, size_t sz) {
     }
 }
 
+static int is_builtin_pack_name(const char *val) {
+    return strcmp(val, "c") == 0 || strcmp(val, "cpp") == 0 ||
+           strcmp(val, "python") == 0 || strcmp(val, "py") == 0 ||
+           strcmp(val, "java") == 0 || strcmp(val, "web") == 0 ||
+           strcmp(val, "git-extras") == 0;
+}
+
 static void add_plugin_spec(Config *cfg, const char *val) {
     if (!val || !val[0] || cfg->num_plugins >= MAX_PLUGINS) return;
     PluginSpec *ps = &cfg->plugins[cfg->num_plugins];
     snprintf(ps->spec, sizeof(ps->spec), "%s", val);
 
-    if (strncmp(val, "http://", 7) == 0 || strncmp(val, "https://", 8) == 0 ||
-        strncmp(val, "git@", 4) == 0) {
-        snprintf(ps->url, sizeof(ps->url), "%s", val);
+    if (is_builtin_pack_name(val)) {
+        ps->is_builtin = 1;
+        snprintf(ps->name, sizeof(ps->name), "%s", val);
+        snprintf(ps->url, sizeof(ps->url), "builtin://%s", val);
     } else {
-        snprintf(ps->url, sizeof(ps->url), "https://github.com/%s.git", val);
-    }
-
-    const char *sl = strrchr(val, '/');
-    const char *nm = sl ? sl + 1 : val;
-    snprintf(ps->name, sizeof(ps->name), "%s", nm);
-    size_t nl = strlen(ps->name);
-    if (nl > 4 && strcmp(ps->name + nl - 4, ".git") == 0) {
-        ps->name[nl - 4] = '\0';
+        ps->is_builtin = 0;
+        if (strncmp(val, "http://", 7) == 0 || strncmp(val, "https://", 8) == 0 ||
+            strncmp(val, "git@", 4) == 0) {
+            snprintf(ps->url, sizeof(ps->url), "%s", val);
+        } else if (strchr(val, '/')) {
+            snprintf(ps->url, sizeof(ps->url), "https://github.com/%s.git", val);
+        } else {
+            snprintf(ps->url, sizeof(ps->url), "local://%s", val);
+        }
+        const char *sl = strrchr(val, '/');
+        const char *nm = sl ? sl + 1 : val;
+        snprintf(ps->name, sizeof(ps->name), "%s", nm);
+        size_t nl = strlen(ps->name);
+        if (nl > 4 && strcmp(ps->name + nl - 4, ".git") == 0) {
+            ps->name[nl - 4] = '\0';
+        }
     }
     ps->installed = 0;
     cfg->num_plugins++;
@@ -409,6 +426,10 @@ static void parse_conf_file(const char *path, Config *cfg) {
             cfg->auto_indent = parse_bool(val);
         } else if (strcmp(key, "auto_pairs") == 0) {
             cfg->auto_pairs = parse_bool(val);
+        } else if (strcmp(key, "auto_complete") == 0) {
+            cfg->auto_complete = parse_bool(val);
+        } else if (strcmp(key, "auto_lint") == 0) {
+            cfg->auto_lint = parse_bool(val);
         } else if (strcmp(key, "mouse") == 0) {
             cfg->mouse_enabled = parse_bool(val);
         } else if (strcmp(key, "sidebar_open") == 0) {

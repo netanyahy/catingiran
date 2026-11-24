@@ -29,6 +29,8 @@ static void open_help_buffer(void) {
         "  :t1 .. :t9       Jump to tab 1..9 (also :e1..:e9 in RU)\n"
         "  :ot / :ht / :tree Open / Hide / Toggle file explorer\n"
         "  :vsplit / :split Vertical / Horizontal split (:only to close)\n"
+        "  :ft <lang>       Set language syntax (python, c, java, js, sh, conf)\n"
+        "  :lint / :fmt     Check syntax errors / Format current file\n"
         "  :run             Compile & run current C/C++/Python/Java/Sh file\n"
         "  :out / :ho       Show / Hide bottom output drawer\n"
         "  :term            Open interactive shell ($SHELL)\n"
@@ -40,13 +42,17 @@ static void open_help_buffer(void) {
         "  :set number      Line numbers (:set nonumber / icons / tabstop=N)\n"
         "\n"
         "PLUGIN MANAGER (catingiran Plug)\n"
+        "  :PlugList        Browse official IDE packs (c, python, java, web...)\n"
         "  :PlugStatus      View configured & installed plugins\n"
-        "  :PlugAdd u/repo  Add plugin to catingiran.conf & install\n"
+        "  :PlugAdd <name>  Install pack (:PlugAdd c/python/java) or GitHub u/repo\n"
+        "  :PlugCreate name Create your own custom plugin\n"
         "  :PlugInstall     Clone plugins from catingiran.conf\n"
         "  :PlugUpdate      Update installed plugins (git pull)\n"
         "  :PlugClean       Remove plugins no longer in catingiran.conf\n"
         "\n"
-        "KEYBINDINGS (NORMAL / VISUAL)\n"
+        "KEYBINDINGS (NORMAL / INSERT / VISUAL)\n"
+        "  Ctrl+Space       Trigger autocomplete popup (Tab/Enter to accept)\n"
+        "  ]d / [d          Jump to next / previous lint diagnostic\n"
         "  h / j / k / l    Move cursor (plus Russian layout support)\n"
         "  gcc / gc(vis)    Toggle line comment (// or #)\n"
         "  J / K (visual)   Move selected lines down / up\n"
@@ -70,8 +76,8 @@ void cmd_autocomplete(char *buf, int *len, int *pos, int max_sz) {
     static const char *cmds[] = {
         "w", "wq", "q", "q!", "x", "e ", "new", "bd", "ot", "ht", "tree",
         "conf", "reload", "run", "out", "ho", "term", "find", "grep ",
-        "git", "diff", "stats", "vsplit", "split", "only",
-        "PlugStatus", "PlugInstall", "PlugUpdate", "PlugClean", "PlugAdd ",
+        "git", "diff", "stats", "vsplit", "split", "only", "ft ", "lint", "fmt",
+        "PlugList", "PlugStatus", "PlugInstall", "PlugUpdate", "PlugClean", "PlugAdd ", "PlugCreate ",
         "theme ", "themes", "set number", "set nonumber", "set cursorline",
         "set nocursorline", "set icons", "set noicons", "help", NULL
     };
@@ -168,10 +174,40 @@ void cmd_execute(const char *raw) {
         plugins_status();
         return;
     }
-    if (strncmp(cmd, "PlugAdd ", 8) == 0) {
+    if (strcmp(cmd, "PlugList") == 0 || strcmp(cmd, "pluglist") == 0) {
+        plugins_list_catalog();
+        return;
+    }
+    if (strncmp(cmd, "PlugAdd ", 8) == 0 || strncmp(cmd, "plugadd ", 8) == 0) {
         char *arg = cmd + 8;
         while (*arg && isspace((unsigned char)*arg)) arg++;
         plugins_add(arg);
+        return;
+    }
+    if (strncmp(cmd, "PlugCreate ", 11) == 0 || strncmp(cmd, "plugcreate ", 11) == 0) {
+        char *arg = cmd + 11;
+        while (*arg && isspace((unsigned char)*arg)) arg++;
+        plugins_create(arg);
+        return;
+    }
+
+    /* Language / Lint / Format */
+    if (strncmp(cmd, "ft ", 3) == 0 || strncmp(cmd, "syntax ", 7) == 0) {
+        char *arg = (cmd[0] == 'f') ? cmd + 3 : cmd + 7;
+        while (*arg && isspace((unsigned char)*arg)) arg++;
+        b->syntax_id = syntax_id_from_name(arg);
+        b->syntax_manual = 1;
+        syntax_update_all(b);
+        editor_set_status("Language set to: %s", syntax_name(b->syntax_id));
+        return;
+    }
+    if (strcmp(cmd, "lint") == 0) {
+        if (b->dirty) buf_save(b, NULL);
+        tools_lint_buffer(b);
+        return;
+    }
+    if (strcmp(cmd, "fmt") == 0 || strcmp(cmd, "format") == 0) {
+        tools_format_buffer(b);
         return;
     }
 

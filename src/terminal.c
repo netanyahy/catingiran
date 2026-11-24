@@ -189,7 +189,11 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 0xC0) {
         int expected = utf8_char_len(uc);
-        utf8_buf[0] = c;
+        if (uc == 0) {
+        return KEY_CTRL_SPACE;
+    }
+
+    utf8_buf[0] = c;
         int got = 1;
         while (got < expected) {
             char next_c;
@@ -199,6 +203,10 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
         utf8_buf[got] = '\0';
         *utf8_bytes_out = got;
         return (int)uc;
+    }
+
+    if (uc == 0) {
+        return KEY_CTRL_SPACE;
     }
 
     utf8_buf[0] = c;

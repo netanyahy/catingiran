@@ -311,6 +311,7 @@ int buf_save(Buffer *b, const char *new_name) {
     b->dirty = 0;
     editor_set_status("\"%s\" %dL, %zuB written", b->filename, b->num_lines, total_bytes);
     tree_refresh();
+    if (E.cfg.auto_lint) tools_lint_buffer(b);
     return 1;
 }
 
@@ -340,6 +341,13 @@ void buf_insert_bytes(Buffer *b, const char *s, int len) {
     line_raw_insert(b, b->cy, b->cx, s, len);
     b->cx += len;
     b->dirty++;
+    if (b->syntax_id == SYN_NONE && !b->syntax_manual && !b->filename) {
+        int det = syntax_detect_from_content(b);
+        if (det != SYN_NONE) {
+            b->syntax_id = det;
+            syntax_update_all(b);
+        }
+    }
 }
 
 void buf_insert_newline(Buffer *b) {

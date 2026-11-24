@@ -233,17 +233,25 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
 
     /* Gutter */
     ab_append_bg(ab, is_cur_line ? E.theme.cursorline_bg : E.theme.gutter_bg);
-    if (ln->bookmarked) {
+    if (ln->diag_level == 2) {
+        Color err_c = {243, 139, 168};
+        ab_append_fg(ab, err_c);
+    } else if (ln->diag_level == 1 || ln->bookmarked) {
         ab_append_fg(ab, E.theme.hl_match);
     } else {
         ab_append_fg(ab, (is_active_pane && file_row == b->cy) ? E.theme.fg : E.theme.gutter_fg);
     }
+    const char *mark = "  ";
+    if (ln->diag_level == 2) mark = "● ";
+    else if (ln->diag_level == 1) mark = "▲ ";
+    else if (ln->bookmarked) mark = "★ ";
+
     if (E.cfg.line_numbers) {
         char gbuf[16];
-        snprintf(gbuf, sizeof(gbuf), "%4d%s", file_row + 1, ln->bookmarked ? "★ " : "  ");
+        snprintf(gbuf, sizeof(gbuf), "%4d%s", file_row + 1, mark);
         ab_append_str(ab, gbuf);
     } else {
-        ab_append_str(ab, ln->bookmarked ? "★" : " ");
+        ab_append_str(ab, mark[0] == ' ' ? " " : mark);
     }
 
     int slen = (E.search_len > 0) ? E.search_len : 0;
@@ -335,10 +343,11 @@ static void draw_statusline(Abuf *ab, Buffer *b) {
              E.git_branch[0] ? "   " : "",
              E.git_branch[0] ? E.git_branch : "");
 
-    char right[160];
+    char right[192];
     int perc = b->num_lines > 0 ? ((b->cy + 1) * 100) / b->num_lines : 100;
-    snprintf(right, sizeof(right), " %s | UTF-8 | %d:%d (%d%%) ",
-             E.theme.name, b->cy + 1, buf_cx_to_rx(b, b->cy, b->cx) + 1, perc);
+    snprintf(right, sizeof(right), " %s | %s | UTF-8 | %d:%d (%d%%) ",
+             syntax_name(b->syntax_id), E.theme.name,
+             b->cy + 1, buf_cx_to_rx(b, b->cy, b->cx) + 1, perc);
 
     int mode_w = (int)strlen(mode_str);
     int r_w = (int)strlen(right);
@@ -507,6 +516,46 @@ void ui_render(void) {
         }
         cur_row = pane_row_off + (b->cy - b->rowoff) + 1;
         cur_col = pane_col_off + gutter_w + (buf_cx_to_rx(b, b->cy, b->cx) - b->coloff) + 1;
+
+        /* Floating Autocomplete Popup near cursor */
+        if (E.ac_visible && E.mode == MODE_INSERT && E.ac_count > 0 && E.screen_cols > 30) {
+            int max_show = E.ac_count < 8 ? E.ac_count : 8;
+            int pop_w = 34;
+            if (cur_col + pop_w > E.screen_cols) {
+                pop_w = E.screen_cols - cur_col;
+                if (pop_w < 18) pop_w = 18;
+            }
+            int pop_col = cur_col;
+            if (pop_col + pop_w > E.screen_cols) pop_col = E.screen_cols - pop_w;
+            if (pop_col < 1) pop_col = 1;
+
+            int pop_row = cur_row + 1;
+            if (pop_row + max_show >= E.screen_rows - 1 && cur_row - max_show > 1) {
+                pop_row = cur_row - max_show;
+            }
+
+            for (int i = 0; i < max_show; i++) {
+                int r = pop_row + i;
+                if (r < 1 || r >= E.screen_rows - 1) continue;
+                ab_append_fmt(&ab, "\x1b[%d;%dH", r, pop_col);
+                if (i == E.ac_sel) {
+                    ab_append_bg(&ab, E.theme.sidebar_sel_bg);
+                    ab_append_fg(&ab, E.theme.sidebar_sel_fg);
+                    ab_append_str(&ab, "\x1b[1m");
+                } else {
+                    ab_append_bg(&ab, E.theme.sidebar_bg);
+                    ab_append_fg(&ab, E.theme.fg);
+                    ab_append_str(&ab, "\x1b[22m");
+                }
+                char entry[96];
+                snprintf(entry, sizeof(entry), " %-24.24s [%4.4s] ",
+                         E.ac_items[i], E.ac_kinds[i]);
+                int ew = ab_append_utf8_cols(&ab, entry, (int)strlen(entry), pop_w);
+                if (ew < pop_w) append_spaces(&ab, pop_w - ew);
+                ab_append_str(&ab, "\x1b[22m");
+            }
+        }
+
         ab_append_fmt(&ab, "\x1b[%d;%dH\x1b[?25h", cur_row, cur_col);
     }
 

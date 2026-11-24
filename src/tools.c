@@ -528,3 +528,159 @@ void tools_next_bookmark(Buffer *b) {
     }
     editor_set_status("No bookmarks in buffer");
 }
+
+static void clear_diags(Buffer *b) {
+    for (int i = 0; i < b->num_lines; i++) {
+        b->lines[i].diag_level = 0;
+        b->lines[i].diag_msg[0] = '\0';
+    }
+}
+
+void tools_lint_buffer(Buffer *b) {
+    if (!b || !b->filename || b->readonly) return;
+    clear_diags(b);
+
+    char cmd[2048] = {0};
+    int is_py = ends_with(b->filename, ".py");
+    int is_c = ends_with(b->filename, ".c");
+    int is_java = ends_with(b->filename, ".java");
+
+    if (!is_py && !is_c && !is_java) return;
+
+    if (is_py) {
+        snprintf(cmd, sizeof(cmd),
+                 "python3 -m py_compile '%s' 2>&1", b->filename);
+    } else if (is_c) {
+        snprintf(cmd, sizeof(cmd),
+                 "cc -fsyntax-only -Wall -Wextra '%s' 2>&1", b->filename);
+    } else if (is_java) {
+        snprintf(cmd, sizeof(cmd),
+                 "mkdir -p /tmp/cti_jlint && javac -d /tmp/cti_jlint '%s' 2>&1", b->filename);
+    }
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return;
+
+    int err_cnt = 0;
+    char line[512];
+    char first_err[128] = {0};
+
+    while (fgets(line, sizeof(line), fp)) {
+        size_t l = strlen(line);
+        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+
+        int row = -1;
+        int level = 2;
+        const char *msg = line;
+
+        if (is_py) {
+            /* Match ", line N" from Python traceback/SyntaxError */
+            char *lp = strstr(line, ", line ");
+            if (lp) {
+                row = atoi(lp + 7) - 1;
+                msg = line;
+            } else if (strstr(line, "Error:") || strstr(line, "SyntaxError") || strstr(line, "IndentationError")) {
+                if (first_err[0]) {
+                    snprintf(first_err, sizeof(first_err), "%s", line);
+                } else {
+                    snprintf(first_err, sizeof(first_err), "%s", line);
+                }
+            }
+        } else if (is_c || is_java) {
+            /* Match "file:line:..." */
+            char *p = strchr(line, ':');
+            if (p) {
+                int lno = atoi(p + 1);
+                if (lno > 0) {
+                    row = lno - 1;
+                    level = strstr(line, "warning:") ? 1 : 2;
+                    char *m = strstr(line, "error:");
+                    if (!m) m = strstr(line, "warning:");
+                    if (m) msg = m;
+                }
+            }
+        }
+
+        if (row >= 0 && row < b->num_lines) {
+            b->lines[row].diag_level = level;
+            snprintf(b->lines[row].diag_msg, sizeof(b->lines[row].diag_msg), "%s", msg);
+            if (!first_err[0]) snprintf(first_err, sizeof(first_err), "L%d: %s", row + 1, msg);
+            err_cnt++;
+        }
+    }
+    int rc = pclose(fp);
+
+    if (err_cnt > 0) {
+        editor_set_status("Lint (%d): %s", err_cnt, first_err);
+    } else if (rc != 0 && first_err[0]) {
+        editor_set_status("Lint error: %s", first_err);
+    }
+}
+
+void tools_next_diag(Buffer *b, int dir) {
+    if (!b || b->num_lines == 0) return;
+    for (int step = 1; step <= b->num_lines; step++) {
+        int r = (b->cy + step * dir + b->num_lines * 2) % b->num_lines;
+        if (b->lines[r].diag_level > 0) {
+            b->cy = r;
+            b->cx = 0;
+            editor_set_status("L%d: %s", r + 1, b->lines[r].diag_msg);
+            return;
+        }
+    }
+    editor_set_status("No diagnostics in buffer");
+}
+
+void tools_format_buffer(Buffer *b) {
+    if (!b || !b->filename || b->readonly) {
+        editor_set_status("Save file first before formatting");
+        return;
+    }
+    if (b->dirty) buf_save(b, NULL);
+
+    char cmd[2048] = {0};
+    if (ends_with(b->filename, ".py")) {
+        snprintf(cmd, sizeof(cmd),
+                 "if command -v ruff >/dev/null 2>&1; then ruff format -q '%s'; "
+                 "elif command -v black >/dev/null 2>&1; then black -q '%s'; else exit 2; fi",
+                 b->filename, b->filename);
+    } else if (ends_with(b->filename, ".c") || ends_with(b->filename, ".h") ||
+               ends_with(b->filename, ".cpp") || ends_with(b->filename, ".java")) {
+        snprintf(cmd, sizeof(cmd),
+                 "if command -v clang-format >/dev/null 2>&1; then clang-format -i '%s'; else exit 2; fi",
+                 b->filename);
+    } else {
+        editor_set_status("No formatter for %s", b->filename);
+        return;
+    }
+
+    int rc = system(cmd) >> 8;
+    if (rc == 0) {
+        int cy = b->cy, cx = b->cx;
+        char *fn = strdup(b->filename);
+        buf_close(E.cur_buf, 1);
+        buf_open(fn);
+        free(fn);
+        Buffer *nb = &E.buffers[E.cur_buf];
+        if (cy < nb->num_lines) nb->cy = cy;
+        if (cx <= nb->lines[nb->cy].size) nb->cx = cx;
+        editor_set_status("Formatted %s", nb->filename);
+    } else {
+        /* Fallback: strip trailing whitespace */
+        int fixed = 0;
+        for (int r = 0; r < b->num_lines; r++) {
+            Line *ln = &b->lines[r];
+            int orig = ln->size;
+            while (ln->size > 0 && (ln->chars[ln->size - 1] == ' ' || ln->chars[ln->size - 1] == '\t')) {
+                ln->size--;
+            }
+            if (ln->size != orig) {
+                ln->chars[ln->size] = '\0';
+                syntax_update_line(b, r);
+                fixed++;
+            }
+        }
+        if (fixed > 0) b->dirty++;
+        editor_set_status("Cleaned trailing spaces on %d line(s)", fixed);
+    }
+}

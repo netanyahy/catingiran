@@ -4,16 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-    SYN_NONE = 0,
-    SYN_C,
-    SYN_PYTHON,
-    SYN_JAVA,
-    SYN_JS,
-    SYN_SHELL,
-    SYN_CONF
-};
-
 /* Multi-line state stored in Line.hl_open_comment */
 enum {
     ML_NONE = 0,
@@ -122,6 +112,46 @@ int syntax_detect(const char *filename) {
     if (has_ext(base, ".conf") || has_ext(base, ".ini") ||
         has_ext(base, ".cfg") || has_ext(base, ".md") || has_ext(base, ".yuck"))
         return SYN_CONF;
+    return SYN_NONE;
+}
+
+int syntax_id_from_name(const char *name) {
+    if (!name || !name[0]) return SYN_NONE;
+    if (strcmp(name, "c") == 0 || strcmp(name, "cpp") == 0) return SYN_C;
+    if (strcmp(name, "python") == 0 || strcmp(name, "py") == 0) return SYN_PYTHON;
+    if (strcmp(name, "java") == 0) return SYN_JAVA;
+    if (strcmp(name, "js") == 0 || strcmp(name, "ts") == 0 || strcmp(name, "javascript") == 0) return SYN_JS;
+    if (strcmp(name, "sh") == 0 || strcmp(name, "bash") == 0 || strcmp(name, "shell") == 0) return SYN_SHELL;
+    if (strcmp(name, "conf") == 0 || strcmp(name, "md") == 0) return SYN_CONF;
+    return SYN_NONE;
+}
+
+const char *syntax_name(int syntax_id) {
+    switch (syntax_id) {
+        case SYN_C:      return "c";
+        case SYN_PYTHON: return "python";
+        case SYN_JAVA:   return "java";
+        case SYN_JS:     return "js";
+        case SYN_SHELL:  return "sh";
+        case SYN_CONF:   return "conf";
+        default:         return "text";
+    }
+}
+
+int syntax_detect_from_content(Buffer *b) {
+    if (!b || b->num_lines == 0) return SYN_NONE;
+    int check = b->num_lines < 20 ? b->num_lines : 20;
+    for (int i = 0; i < check; i++) {
+        const char *s = b->lines[i].chars;
+        if (!s) continue;
+        if (strstr(s, "python")) return SYN_PYTHON;
+        if (strncmp(s, "#!/", 3) == 0 && (strstr(s, "sh") || strstr(s, "bash"))) return SYN_SHELL;
+        if (strncmp(s, "#include", 8) == 0 || strstr(s, "printf(") || strstr(s, "int main(")) return SYN_C;
+        if (strstr(s, "public class ") || strstr(s, "System.out.")) return SYN_JAVA;
+        if (strncmp(s, "def ", 4) == 0 || strncmp(s, "import ", 7) == 0 ||
+            strncmp(s, "from ", 5) == 0 || strstr(s, "print(") ||
+            strncmp(s, "class ", 6) == 0) return SYN_PYTHON;
+    }
     return SYN_NONE;
 }
 
