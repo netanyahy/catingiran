@@ -40,6 +40,7 @@ static const char *file_icon(const TreeNode *n) {
     if (strcmp(dot, ".c") == 0) return "   ";
     if (strcmp(dot, ".h") == 0) return "   ";
     if (strcmp(dot, ".py") == 0) return "   ";
+    if (strcmp(dot, ".java") == 0) return "   ";
     if (strcmp(dot, ".js") == 0 || strcmp(dot, ".ts") == 0) return "   ";
     if (strcmp(dot, ".sh") == 0 || strcmp(dot, ".mksh") == 0) return "   ";
     if (strcmp(dot, ".md") == 0) return "   ";

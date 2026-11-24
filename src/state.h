@@ -49,6 +49,7 @@ typedef enum {
     HL_STRING,
     HL_NUMBER,
     HL_PREPROC,
+    HL_FUNC,
     HL_MATCH
 } HlType;
 
@@ -86,6 +87,7 @@ typedef struct {
     Color hl_string;
     Color hl_number;
     Color hl_preproc;
+    Color hl_func;
     Color hl_match;
 } Theme;
 

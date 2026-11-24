@@ -41,6 +41,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {175, 196, 174},
         .hl_number = {212, 184, 152},
         .hl_preproc = {188, 174, 204},
+        .hl_func = {174, 198, 224},
         .hl_match = {255, 215, 110}
     },
     /* 2. Obsidian (Pitch black + Gentoo violet accent) */
@@ -72,6 +73,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {152, 212, 170},
         .hl_number = {232, 184, 134},
         .hl_preproc = {212, 160, 232},
+        .hl_func = {196, 178, 255},
         .hl_match = {255, 210, 90}
     },
     /* 3. Catppuccin Mocha */
@@ -103,6 +105,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {166, 227, 161},
         .hl_number = {250, 179, 135},
         .hl_preproc = {137, 180, 250},
+        .hl_func = {137, 220, 235},
         .hl_match = {249, 226, 175}
     },
     /* 4. Tokyo Night */
@@ -134,6 +137,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {158, 206, 106},
         .hl_number = {255, 158, 100},
         .hl_preproc = {122, 162, 247},
+        .hl_func = {122, 162, 247},
         .hl_match = {224, 175, 104}
     },
     /* 5. Nord */
@@ -165,6 +169,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {163, 190, 140},
         .hl_number = {180, 142, 173},
         .hl_preproc = {136, 192, 208},
+        .hl_func = {136, 192, 208},
         .hl_match = {235, 203, 139}
     },
     /* 6. Light */
@@ -196,6 +201,7 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_string = {17, 99, 41},
         .hl_number = {5, 80, 174},
         .hl_preproc = {149, 56, 0},
+        .hl_func = {9, 105, 218},
         .hl_match = {255, 220, 110}
     }
 };
