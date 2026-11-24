@@ -162,6 +162,7 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
                 } else if (seq[2] >= '0' && seq[2] <= '9') {
                     if (read_byte(&seq[3]) == 1 && seq[3] == '~') {
                         if (seq[1] == '1' && seq[2] == '2') return KEY_F2;
+                        if (seq[1] == '1' && seq[2] == '5') return KEY_F5;
                     }
                 }
             } else {

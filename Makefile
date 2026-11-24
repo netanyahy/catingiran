@@ -9,7 +9,7 @@ CPPFLAGS += -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -DSYSCONFDIR='"$(SYSCO
 LDFLAGS ?=
 
 TARGET = cti
-SRCS = src/main.c src/terminal.c src/config.c src/buffer.c src/syntax.c src/tree.c src/ui.c src/commands.c
+SRCS = src/main.c src/terminal.c src/config.c src/buffer.c src/syntax.c src/tree.c src/ui.c src/commands.c src/plugins.c src/tools.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean install uninstall
@@ -33,6 +33,22 @@ install: $(TARGET)
 	install -m 644 catingiran.conf "$(DESTDIR)$(DATADIR)/catingiran.conf"
 	install -d "$(DESTDIR)$(SYSCONFDIR)"
 	install -m 644 catingiran.conf "$(DESTDIR)$(SYSCONFDIR)/catingiran.conf"
+	@if [ -z "$(DESTDIR)" ]; then \
+		REAL_HOME="$$HOME"; \
+		if [ -n "$$SUDO_USER" ]; then \
+			REAL_HOME=$$(getent passwd "$$SUDO_USER" | cut -d: -f6); \
+		fi; \
+		if [ -n "$$REAL_HOME" ]; then \
+			mkdir -p "$$REAL_HOME/.config/catingiran/plugins"; \
+			if [ ! -f "$$REAL_HOME/.config/catingiran/catingiran.conf" ]; then \
+				cp catingiran.conf "$$REAL_HOME/.config/catingiran/catingiran.conf"; \
+				echo "Created user config at $$REAL_HOME/.config/catingiran/catingiran.conf"; \
+			fi; \
+			if [ -n "$$SUDO_USER" ]; then \
+				chown -R "$$SUDO_USER:$$SUDO_USER" "$$REAL_HOME/.config/catingiran"; \
+			fi; \
+		fi; \
+	fi
 	@echo "Installed catingiran (cti) to $(DESTDIR)$(BINDIR)/$(TARGET)"
 
 uninstall:

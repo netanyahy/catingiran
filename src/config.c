@@ -238,6 +238,9 @@ void config_init_defaults(Config *cfg) {
     cfg->nerd_icons = 1;
     cfg->russian_keymap = 1;
     cfg->show_tabs = 1;
+    cfg->output_height = 8;
+    cfg->git_branch = 1;
+    cfg->num_plugins = 0;
 }
 
 static char *trim_ws(char *s) {
@@ -276,6 +279,29 @@ void config_get_user_path(char *buf, size_t sz) {
     }
 }
 
+static void add_plugin_spec(Config *cfg, const char *val) {
+    if (!val || !val[0] || cfg->num_plugins >= MAX_PLUGINS) return;
+    PluginSpec *ps = &cfg->plugins[cfg->num_plugins];
+    snprintf(ps->spec, sizeof(ps->spec), "%s", val);
+
+    if (strncmp(val, "http://", 7) == 0 || strncmp(val, "https://", 8) == 0 ||
+        strncmp(val, "git@", 4) == 0) {
+        snprintf(ps->url, sizeof(ps->url), "%s", val);
+    } else {
+        snprintf(ps->url, sizeof(ps->url), "https://github.com/%s.git", val);
+    }
+
+    const char *sl = strrchr(val, '/');
+    const char *nm = sl ? sl + 1 : val;
+    snprintf(ps->name, sizeof(ps->name), "%s", nm);
+    size_t nl = strlen(ps->name);
+    if (nl > 4 && strcmp(ps->name + nl - 4, ".git") == 0) {
+        ps->name[nl - 4] = '\0';
+    }
+    ps->installed = 0;
+    cfg->num_plugins++;
+}
+
 static void copy_preset_if_missing(const char *user_path) {
     struct stat st;
     if (stat(user_path, &st) == 0) return;
@@ -291,7 +317,6 @@ static void copy_preset_if_missing(const char *user_path) {
         src = fopen(candidates[i], "r");
         if (src) break;
     }
-    if (!src) return;
 
     const char *xdg = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
@@ -310,14 +335,36 @@ static void copy_preset_if_missing(const char *user_path) {
 
     FILE *dst = fopen(user_path, "w");
     if (dst) {
-        char buf[4096];
-        size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
-            fwrite(buf, 1, n, dst);
+        if (src) {
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+                fwrite(buf, 1, n, dst);
+            }
+        } else {
+            fprintf(dst,
+                    "# catingiran (cti) configuration\n"
+                    "theme = charcoal\n"
+                    "tab_size = 4\n"
+                    "expand_tab = true\n"
+                    "line_numbers = true\n"
+                    "cursorline = true\n"
+                    "auto_indent = true\n"
+                    "auto_pairs = true\n"
+                    "show_tabs = true\n"
+                    "mouse = true\n"
+                    "sidebar_open = true\n"
+                    "sidebar_width = 28\n"
+                    "show_hidden = true\n"
+                    "nerd_icons = true\n"
+                    "output_height = 8\n"
+                    "git_branch = true\n"
+                    "russian_keymap = true\n"
+                    "# plugin = user/repo\n");
         }
         fclose(dst);
     }
-    fclose(src);
+    if (src) fclose(src);
 }
 
 static void parse_conf_file(const char *path, Config *cfg) {
@@ -377,6 +424,13 @@ static void parse_conf_file(const char *path, Config *cfg) {
             cfg->russian_keymap = parse_bool(val);
         } else if (strcmp(key, "show_tabs") == 0) {
             cfg->show_tabs = parse_bool(val);
+        } else if (strcmp(key, "output_height") == 0) {
+            int n = atoi(val);
+            if (n >= 4 && n <= 30) cfg->output_height = n;
+        } else if (strcmp(key, "git_branch") == 0) {
+            cfg->git_branch = parse_bool(val);
+        } else if (strcmp(key, "plugin") == 0) {
+            add_plugin_spec(cfg, val);
         }
     }
     fclose(f);
@@ -396,4 +450,5 @@ void config_load(Config *cfg) {
     if (!theme_apply(cfg->theme, &E.theme)) {
         theme_apply("charcoal", &E.theme);
     }
+    plugins_load_all();
 }

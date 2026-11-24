@@ -183,10 +183,12 @@ static void draw_welcome_line(Abuf *ab, int rel_row, int ed_rows, int ed_cols) {
         "catingiran (cti) v" CTI_VERSION,
         "",
         "Ctrl+B / :ot / :ht  -  Toggle file explorer",
-        "Ctrl+H / Ctrl+L     -  Switch sidebar / editor",
-        ":t1..:t9 / Tab      -  Switch open tabs",
-        ":theme <name>       -  Switch theme (charcoal, obsidian, ...)",
-        ":w / :q / :help     -  Save / Quit / Help"
+        "Ctrl+P / :find      -  Fuzzy find file in project",
+        ":grep <text>        -  Project-wide search",
+        "F5 / :run / Ctrl+J  -  Run code & toggle output drawer",
+        ":vsplit / :split    -  Split panes (Ctrl+W switch)",
+        ":conf / :PlugStatus -  Edit config / Plugin manager",
+        ":t1..:t9 / :theme   -  Switch tabs / Switch theme"
     };
     int count = (int)(sizeof(welcome) / sizeof(welcome[0]));
     int start_row = ed_rows / 2 - count / 2;
@@ -205,19 +207,19 @@ static void draw_welcome_line(Abuf *ab, int rel_row, int ed_rows, int ed_cols) {
     if (pad + w < ed_cols) append_spaces(ab, ed_cols - pad - w);
 }
 
-static void draw_editor_row(Abuf *ab, Buffer *b, int rel_row, int ed_rows, int ed_cols) {
+static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row, int ed_rows, int ed_cols) {
     int file_row = b->rowoff + rel_row;
     int gutter_w = E.cfg.line_numbers ? 6 : 1;
     int text_cols = ed_cols - gutter_w;
     if (text_cols < 1) text_cols = 1;
 
-    int is_cur_line = (file_row == b->cy && E.cfg.cursorline && E.focus == FOCUS_EDITOR);
+    int is_cur_line = (is_active_pane && file_row == b->cy && E.cfg.cursorline && E.focus == FOCUS_EDITOR);
     Color line_bg = is_cur_line ? E.theme.cursorline_bg : E.theme.bg;
 
     if (file_row >= b->num_lines) {
         ab_append_bg(ab, E.theme.bg);
         ab_append_fg(ab, E.theme.gutter_fg);
-        if (b->num_lines == 1 && b->lines[0].size == 0 && !b->filename && rel_row > 0) {
+        if (b->num_lines == 1 && b->lines[0].size == 0 && !b->filename && rel_row > 0 && is_active_pane) {
             ab_append_str(ab, "~");
             draw_welcome_line(ab, rel_row, ed_rows, ed_cols - 1);
         } else {
@@ -227,18 +229,23 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int rel_row, int ed_rows, int e
         return;
     }
 
+    Line *ln = &b->lines[file_row];
+
     /* Gutter */
     ab_append_bg(ab, is_cur_line ? E.theme.cursorline_bg : E.theme.gutter_bg);
-    ab_append_fg(ab, (file_row == b->cy) ? E.theme.fg : E.theme.gutter_fg);
+    if (ln->bookmarked) {
+        ab_append_fg(ab, E.theme.hl_match);
+    } else {
+        ab_append_fg(ab, (is_active_pane && file_row == b->cy) ? E.theme.fg : E.theme.gutter_fg);
+    }
     if (E.cfg.line_numbers) {
         char gbuf[16];
-        snprintf(gbuf, sizeof(gbuf), "%4d  ", file_row + 1);
+        snprintf(gbuf, sizeof(gbuf), "%4d%s", file_row + 1, ln->bookmarked ? "★ " : "  ");
         ab_append_str(ab, gbuf);
     } else {
-        ab_append_str(ab, " ");
+        ab_append_str(ab, ln->bookmarked ? "★" : " ");
     }
 
-    Line *ln = &b->lines[file_row];
     int slen = (E.search_len > 0) ? E.search_len : 0;
 
     int rx = 0;
@@ -322,11 +329,13 @@ static void draw_statusline(Abuf *ab, Buffer *b) {
     ab_append_fg(ab, E.theme.status_fg);
 
     char left[256];
-    snprintf(left, sizeof(left), " %s%s",
+    snprintf(left, sizeof(left), " %s%s%s%s",
              b->filename ? b->filename : "[No Name]",
-             b->dirty ? " [+]" : "");
+             b->dirty ? " [+]" : "",
+             E.git_branch[0] ? "   " : "",
+             E.git_branch[0] ? E.git_branch : "");
 
-    char right[128];
+    char right[160];
     int perc = b->num_lines > 0 ? ((b->cy + 1) * 100) / b->num_lines : 100;
     snprintf(right, sizeof(right), " %s | UTF-8 | %d:%d (%d%%) ",
              E.theme.name, b->cy + 1, buf_cx_to_rx(b, b->cy, b->cx) + 1, perc);
@@ -361,12 +370,40 @@ static void draw_cmdline(Abuf *ab) {
     if (drawn < E.screen_cols) append_spaces(ab, E.screen_cols - drawn);
 }
 
+static void draw_output_row(Abuf *ab, int row_idx, int total_cols) {
+    if (row_idx == 0) {
+        ab_append_bg(ab, E.theme.tab_active_bg);
+        ab_append_fg(ab, E.theme.tab_active_fg);
+        char hdr[128];
+        snprintf(hdr, sizeof(hdr), " OUTPUT [%s]  (Ctrl+J / :ho to hide) ", E.output_title);
+        int w = ab_append_utf8_cols(ab, hdr, (int)strlen(hdr), total_cols);
+        append_spaces(ab, total_cols - w);
+        return;
+    }
+
+    ab_append_bg(ab, E.theme.sidebar_bg);
+    ab_append_fg(ab, E.theme.fg);
+    int out_rows = (E.cfg.output_height > 2 ? E.cfg.output_height : 8) - 1;
+    int start = (E.output_len > out_rows) ? (E.output_len - out_rows) : 0;
+    int idx = start + (row_idx - 1);
+    if (idx < E.output_len) {
+        ab_append_str(ab, " ");
+        int w = 1 + ab_append_utf8_cols(ab, E.output_lines[idx],
+                                        (int)strlen(E.output_lines[idx]), total_cols - 1);
+        append_spaces(ab, total_cols - w);
+    } else {
+        append_spaces(ab, total_cols);
+    }
+}
+
 void ui_render(void) {
     term_update_size();
     Buffer *b = &E.buffers[E.cur_buf];
+    if (E.split_buf < 0 || E.split_buf >= E.num_buffers) E.split_buf = E.cur_buf;
 
     int top_rows = E.cfg.show_tabs ? 1 : 0;
-    int body_rows = E.screen_rows - top_rows - 2; /* statusline + cmdline */
+    int out_h = (E.output_visible && E.screen_rows > 12) ? E.cfg.output_height : 0;
+    int body_rows = E.screen_rows - top_rows - 2 - out_h; /* statusline + cmdline + output */
     if (body_rows < 1) body_rows = 1;
 
     int sb_w = 0;
@@ -375,10 +412,32 @@ void ui_render(void) {
         sb_w = E.cfg.sidebar_width;
         border_w = 1;
     }
-    int ed_cols = E.screen_cols - sb_w - border_w;
-    if (ed_cols < 1) ed_cols = 1;
+    int ed_total_cols = E.screen_cols - sb_w - border_w;
+    if (ed_total_cols < 1) ed_total_cols = 1;
 
-    scroll_editor(b, body_rows, ed_cols);
+    int pane0_idx = (E.active_pane == 0) ? E.cur_buf : E.split_buf;
+    int pane1_idx = (E.active_pane == 0) ? E.split_buf : E.cur_buf;
+    Buffer *p0 = &E.buffers[pane0_idx];
+    Buffer *p1 = &E.buffers[pane1_idx];
+
+    int p0_cols = ed_total_cols, p1_cols = 0;
+    int p0_rows = body_rows, p1_rows = 0;
+
+    if (E.split_mode == SPLIT_VERT && ed_total_cols >= 24) {
+        p0_cols = (ed_total_cols - 1) / 2;
+        p1_cols = ed_total_cols - 1 - p0_cols;
+        p1_rows = body_rows;
+        scroll_editor(p0, p0_rows, p0_cols);
+        scroll_editor(p1, p1_rows, p1_cols);
+    } else if (E.split_mode == SPLIT_HORIZ && body_rows >= 6) {
+        p0_rows = (body_rows - 1) / 2;
+        p1_rows = body_rows - 1 - p0_rows;
+        p1_cols = ed_total_cols;
+        scroll_editor(p0, p0_rows, p0_cols);
+        scroll_editor(p1, p1_rows, p1_cols);
+    } else {
+        scroll_editor(b, body_rows, ed_total_cols);
+    }
     if (sb_w > 0) scroll_sidebar(body_rows);
 
     Abuf ab = {NULL, 0, 0};
@@ -396,7 +455,30 @@ void ui_render(void) {
             ab_append_fg(&ab, E.theme.border_fg);
             ab_append_str(&ab, "│");
         }
-        draw_editor_row(&ab, b, r, body_rows, ed_cols);
+        if (E.split_mode == SPLIT_VERT && p1_cols > 0) {
+            draw_editor_row(&ab, p0, (E.active_pane == 0), r, p0_rows, p0_cols);
+            ab_append_bg(&ab, E.theme.bg);
+            ab_append_fg(&ab, E.theme.border_fg);
+            ab_append_str(&ab, "│");
+            draw_editor_row(&ab, p1, (E.active_pane == 1), r, p1_rows, p1_cols);
+        } else if (E.split_mode == SPLIT_HORIZ && p1_rows > 0) {
+            if (r < p0_rows) {
+                draw_editor_row(&ab, p0, (E.active_pane == 0), r, p0_rows, ed_total_cols);
+            } else if (r == p0_rows) {
+                ab_append_bg(&ab, E.theme.bg);
+                ab_append_fg(&ab, E.theme.border_fg);
+                for (int c = 0; c < ed_total_cols; c++) ab_append_str(&ab, "─");
+            } else {
+                draw_editor_row(&ab, p1, (E.active_pane == 1), r - p0_rows - 1, p1_rows, ed_total_cols);
+            }
+        } else {
+            draw_editor_row(&ab, b, 1, r, body_rows, ed_total_cols);
+        }
+        ab_append_str(&ab, "\r\n");
+    }
+
+    for (int r = 0; r < out_h; r++) {
+        draw_output_row(&ab, r, E.screen_cols);
         ab_append_str(&ab, "\r\n");
     }
 
@@ -416,8 +498,15 @@ void ui_render(void) {
         ab_append_fmt(&ab, "\x1b[%d;%dH\x1b[?25h", cur_row, cur_col);
     } else if (E.focus == FOCUS_EDITOR) {
         int gutter_w = E.cfg.line_numbers ? 6 : 1;
-        cur_row = top_rows + (b->cy - b->rowoff) + 1;
-        cur_col = sb_w + border_w + gutter_w + (buf_cx_to_rx(b, b->cy, b->cx) - b->coloff) + 1;
+        int pane_col_off = sb_w + border_w;
+        int pane_row_off = top_rows;
+        if (E.split_mode == SPLIT_VERT && p1_cols > 0 && E.active_pane == 1) {
+            pane_col_off += p0_cols + 1;
+        } else if (E.split_mode == SPLIT_HORIZ && p1_rows > 0 && E.active_pane == 1) {
+            pane_row_off += p0_rows + 1;
+        }
+        cur_row = pane_row_off + (b->cy - b->rowoff) + 1;
+        cur_col = pane_col_off + gutter_w + (buf_cx_to_rx(b, b->cy, b->cx) - b->coloff) + 1;
         ab_append_fmt(&ab, "\x1b[%d;%dH\x1b[?25h", cur_row, cur_col);
     }
 

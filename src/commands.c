@@ -13,90 +13,67 @@ static int has_dirty_buffers(void) {
 }
 
 static void open_help_buffer(void) {
-    static const char *help_lines[] = {
-        "==============================================================",
-        "               catingiran (cti) v" CTI_VERSION " - Quick Help",
-        "==============================================================",
-        "",
-        "COMMAND LINE (:)",
-        "  :w [file]        Save current file (or save as)",
-        "  :q / :q!         Quit (force quit without saving)",
-        "  :wq / :x         Save and quit",
-        "  :e <file>        Open file in new tab",
-        "  :new             Open empty untitled tab",
-        "  :bd / :c         Close current tab",
-        "  :t1 .. :t9       Jump to tab 1..9 (also :e1..:e9 in RU)",
-        "  :ot / :ht        Open / Hide file explorer sidebar (also :ot/:nt in RU)",
-        "  :tree            Toggle file explorer sidebar",
-        "  :theme <name>    Switch theme (" "charcoal, obsidian, catppuccin, tokyonight, nord, light" ")",
-        "  :themes          List available themes",
-        "  :set number      Show line numbers (:set nonumber to hide)",
-        "  :set icons       Enable Nerd Font icons (:set noicons to disable)",
-        "  :reload          Reload catingiran.conf",
-        "",
-        "KEYBINDINGS (NORMAL MODE)",
-        "  h / j / k / l    Move cursor (also Russian layout if enabled)",
-        "  w / b / 0 / $    Word forward/back, line start/end",
-        "  gg / G           Top / bottom of file",
-        "  i / a / o / O    Insert mode",
-        "  v                Visual mode (y=yank, d=delete, >/< =indent)",
-        "  dd / yy / p / u  Delete line / Yank line / Paste / Undo",
-        "  /pattern         Search forward (n=next, N=prev)",
-        "  Ctrl+B / F2      Toggle file explorer sidebar",
-        "  Ctrl+H / Ctrl+L  Focus sidebar / Focus code editor",
-        "  Tab / Shift+Tab  Next / Previous tab",
-        "  Space + 1..9     Jump to tab 1..9",
-        "  Space + e        Toggle sidebar",
-        "  Space + w / q    Save / Quit",
-        "",
-        "FILE EXPLORER SIDEBAR (when focused)",
-        "  j / k / Enter    Navigate / Open file or expand folder",
-        "  h / Left         Collapse folder or jump to parent",
-        "  a / d / r        Create file (dir/ for folder) / Delete / Rename",
-        "  H / R            Toggle hidden files / Refresh tree",
-        "",
-        "CONFIG FILE",
-        "  ~/.config/catingiran/catingiran.conf",
-        "=============================================================="
-    };
+    const char *help_text =
+        "==============================================================\n"
+        "               catingiran (cti) v" CTI_VERSION " - Quick Help\n"
+        "==============================================================\n"
+        "\n"
+        "COMMAND LINE (:)\n"
+        "  :w [file]        Save current file (or save as)\n"
+        "  :q / :q!         Quit (force quit without saving)\n"
+        "  :wq / :x         Save and quit\n"
+        "  :e <file>        Open file in new tab\n"
+        "  :new / :bd       New empty tab / Close current tab\n"
+        "  :conf            Edit ~/.config/catingiran/catingiran.conf\n"
+        "  :reload          Reload catingiran.conf & plugins\n"
+        "  :t1 .. :t9       Jump to tab 1..9 (also :e1..:e9 in RU)\n"
+        "  :ot / :ht / :tree Open / Hide / Toggle file explorer\n"
+        "  :vsplit / :split Vertical / Horizontal split (:only to close)\n"
+        "  :run             Compile & run current C/C++/Python/Java/Sh file\n"
+        "  :out / :ho       Show / Hide bottom output drawer\n"
+        "  :term            Open interactive shell ($SHELL)\n"
+        "  :find            Fuzzy quick-open file in project\n"
+        "  :grep <text>     Search across project (Enter on line jumps)\n"
+        "  :git / :diff     Show Git status/log or Git diff\n"
+        "  :stats           Project code statistics & TODO count\n"
+        "  :theme <name>    Switch theme (" "charcoal, obsidian, catppuccin, tokyonight, nord, light" ")\n"
+        "  :set number      Line numbers (:set nonumber / icons / tabstop=N)\n"
+        "\n"
+        "PLUGIN MANAGER (catingiran Plug)\n"
+        "  :PlugStatus      View configured & installed plugins\n"
+        "  :PlugAdd u/repo  Add plugin to catingiran.conf & install\n"
+        "  :PlugInstall     Clone plugins from catingiran.conf\n"
+        "  :PlugUpdate      Update installed plugins (git pull)\n"
+        "  :PlugClean       Remove plugins no longer in catingiran.conf\n"
+        "\n"
+        "KEYBINDINGS (NORMAL / VISUAL)\n"
+        "  h / j / k / l    Move cursor (plus Russian layout support)\n"
+        "  gcc / gc(vis)    Toggle line comment (// or #)\n"
+        "  J / K (visual)   Move selected lines down / up\n"
+        "  m / M            Toggle bookmark (★) / Jump to next bookmark\n"
+        "  F5 / Space+r     Run current file\n"
+        "  Ctrl+J           Toggle output drawer\n"
+        "  Ctrl+P / Space+ff Fuzzy file finder\n"
+        "  Ctrl+B / F2      Toggle file explorer sidebar\n"
+        "  Ctrl+W           Switch active split pane\n"
+        "  Ctrl+H / Ctrl+L  Focus sidebar / Focus code editor\n"
+        "  Tab / Shift+Tab  Next / Previous tab\n"
+        "  Space + 1..9     Jump to tab 1..9\n"
+        "  Space + v / s / x Vertical split / Horizontal split / Close split\n"
+        "  Space + e / w / q Toggle sidebar / Save / Quit\n"
+        "==============================================================\n";
 
-    if (E.num_buffers >= MAX_BUFFERS) {
-        editor_set_status("Close a tab first to view :help");
-        return;
-    }
-
-    int slot = E.num_buffers++;
-    Buffer *b = &E.buffers[slot];
-    buf_init_empty(b);
-    b->filename = strdup("[Help]");
-    b->readonly = 1;
-    b->undo_recording = 0;
-
-    /* Replace initial empty line with help content */
-    b->lines[0].size = 0;
-    b->lines[0].chars[0] = '\0';
-    int n = (int)(sizeof(help_lines) / sizeof(help_lines[0]));
-    for (int i = 0; i < n; i++) {
-        if (i > 0) {
-            b->cy = i - 1;
-            b->cx = b->lines[i - 1].size;
-            buf_insert_newline(b);
-        }
-        buf_insert_bytes(b, help_lines[i], (int)strlen(help_lines[i]));
-    }
-    b->cy = 0;
-    b->cx = 0;
-    b->dirty = 0;
-    b->undo_recording = 1;
-    E.cur_buf = slot;
-    E.focus = FOCUS_EDITOR;
+    buf_open_scratch("[Help]", help_text, 0);
 }
 
 void cmd_autocomplete(char *buf, int *len, int *pos, int max_sz) {
     static const char *cmds[] = {
         "w", "wq", "q", "q!", "x", "e ", "new", "bd", "ot", "ht", "tree",
+        "conf", "reload", "run", "out", "ho", "term", "find", "grep ",
+        "git", "diff", "stats", "vsplit", "split", "only",
+        "PlugStatus", "PlugInstall", "PlugUpdate", "PlugClean", "PlugAdd ",
         "theme ", "themes", "set number", "set nonumber", "set cursorline",
-        "set nocursorline", "set icons", "set noicons", "reload", "help", NULL
+        "set nocursorline", "set icons", "set noicons", "help", NULL
     };
 
     if (*len <= 0) return;
@@ -165,7 +142,116 @@ void cmd_execute(const char *raw) {
         return;
     }
 
+    /* Config file open */
+    if (strcmp(cmd, "conf") == 0 || strcmp(cmd, "config") == 0) {
+        char uconf[1024];
+        config_get_user_path(uconf, sizeof(uconf));
+        buf_open(uconf);
+        E.focus = FOCUS_EDITOR;
+        return;
+    }
+
+    /* Plugin manager commands */
+    if (strcmp(cmd, "PlugInstall") == 0 || strcmp(cmd, "pluginstall") == 0) {
+        plugins_install();
+        return;
+    }
+    if (strcmp(cmd, "PlugUpdate") == 0 || strcmp(cmd, "plugupdate") == 0) {
+        plugins_update();
+        return;
+    }
+    if (strcmp(cmd, "PlugClean") == 0 || strcmp(cmd, "plugclean") == 0) {
+        plugins_clean();
+        return;
+    }
+    if (strcmp(cmd, "PlugStatus") == 0 || strcmp(cmd, "plugstatus") == 0) {
+        plugins_status();
+        return;
+    }
+    if (strncmp(cmd, "PlugAdd ", 8) == 0) {
+        char *arg = cmd + 8;
+        while (*arg && isspace((unsigned char)*arg)) arg++;
+        plugins_add(arg);
+        return;
+    }
+
+    /* IDE Tools */
+    if (strcmp(cmd, "run") == 0) {
+        tools_run_current();
+        return;
+    }
+    if (strcmp(cmd, "out") == 0) {
+        E.output_visible = 1;
+        return;
+    }
+    if (strcmp(cmd, "ho") == 0) {
+        E.output_visible = 0;
+        return;
+    }
+    if (strcmp(cmd, "term") == 0 || strcmp(cmd, "sh") == 0) {
+        tools_spawn_shell();
+        return;
+    }
+    if (strcmp(cmd, "find") == 0) {
+        tools_fuzzy_find();
+        return;
+    }
+    if (strncmp(cmd, "grep ", 5) == 0) {
+        char *arg = cmd + 5;
+        while (*arg && isspace((unsigned char)*arg)) arg++;
+        tools_grep(arg);
+        return;
+    }
+    if (strcmp(cmd, "git") == 0 || strcmp(cmd, "gs") == 0) {
+        tools_git_status();
+        return;
+    }
+    if (strcmp(cmd, "diff") == 0) {
+        tools_git_diff();
+        return;
+    }
+    if (strcmp(cmd, "stats") == 0) {
+        tools_project_stats();
+        return;
+    }
+    if (strcmp(cmd, "mark") == 0) {
+        tools_toggle_bookmark(b, b->cy);
+        return;
+    }
+    if (strcmp(cmd, "dup") == 0) {
+        tools_duplicate_line(b);
+        return;
+    }
+
+    /* Split panes */
+    if (strcmp(cmd, "vsplit") == 0 || strcmp(cmd, "vs") == 0) {
+        if (E.split_mode == SPLIT_NONE) {
+            E.split_buf = (E.num_buffers > 1) ? ((E.cur_buf + 1) % E.num_buffers) : E.cur_buf;
+            E.active_pane = 0;
+        }
+        E.split_mode = SPLIT_VERT;
+        return;
+    }
+    if (strcmp(cmd, "split") == 0 || strcmp(cmd, "sp") == 0) {
+        if (E.split_mode == SPLIT_NONE) {
+            E.split_buf = (E.num_buffers > 1) ? ((E.cur_buf + 1) % E.num_buffers) : E.cur_buf;
+            E.active_pane = 0;
+        }
+        E.split_mode = SPLIT_HORIZ;
+        return;
+    }
+    if (strcmp(cmd, "only") == 0 || strcmp(cmd, "close") == 0) {
+        E.split_mode = SPLIT_NONE;
+        E.active_pane = 0;
+        return;
+    }
+
     if (strcmp(cmd, "q") == 0) {
+        if (E.split_mode != SPLIT_NONE) {
+            E.split_mode = SPLIT_NONE;
+            E.active_pane = 0;
+            return;
+        }
         if (has_dirty_buffers()) {
             editor_set_status("Unsaved changes! Use :q! to force quit or :wq to save");
         } else {
@@ -271,7 +357,8 @@ void cmd_execute(const char *raw) {
     if (strcmp(cmd, "reload") == 0) {
         config_load(&E.cfg);
         tree_refresh();
-        editor_set_status("Reloaded catingiran.conf");
+        tools_refresh_git_branch();
+        editor_set_status("Reloaded catingiran.conf & plugins");
         return;
     }
     if (strcmp(cmd, "help") == 0 || strcmp(cmd, "h") == 0) {
@@ -296,6 +383,9 @@ void cmd_execute(const char *raw) {
         E.focus = FOCUS_EDITOR;
         return;
     }
+
+    /* Custom commands registered by plugins */
+    if (plugins_try_command(cmd)) return;
 
     editor_set_status("Not an editor command: :%s", cmd);
 }

@@ -466,10 +466,28 @@ static void handle_visual_key(int key, const char *ubuf) {
     int sy = b->vis_sy, ey = b->cy;
     if (sy > ey) { int t = sy; sy = ey; ey = t; }
 
+    if (E.pending_g) {
+        E.pending_g = 0;
+        if (key == 'c') {
+            tools_toggle_comment(b, sy, ey);
+            E.mode = MODE_NORMAL;
+        }
+        return;
+    }
+
     switch (key) {
         case KEY_ESC:
         case 'v':
             E.mode = MODE_NORMAL;
+            break;
+        case 'g':
+            E.pending_g = 1;
+            break;
+        case 'J':
+            tools_move_lines(b, sy, ey, 1);
+            break;
+        case 'K':
+            tools_move_lines(b, sy, ey, -1);
             break;
         case 'h': case 'j': case 'k': case 'l':
         case KEY_ARROW_LEFT: case KEY_ARROW_DOWN: case KEY_ARROW_UP: case KEY_ARROW_RIGHT:
@@ -518,6 +536,19 @@ static void handle_normal_key(int key, const char *ubuf) {
         if (mapped) key = mapped;
     }
 
+    /* <Space> f ... sequences (ff = fuzzy find, fg = grep) */
+    if (E.pending_f) {
+        E.pending_f = 0;
+        if (key == 'f') {
+            tools_fuzzy_find();
+        } else if (key == 'g') {
+            char q[128] = {0};
+            editor_prompt_input("Grep project: ", q, sizeof(q));
+            if (q[0]) tools_grep(q);
+        }
+        return;
+    }
+
     /* Leader sequences (<Space> + ...) */
     if (E.pending_leader) {
         E.pending_leader = 0;
@@ -525,6 +556,22 @@ static void handle_normal_key(int key, const char *ubuf) {
             E.sidebar_visible = !E.sidebar_visible;
             E.focus = E.sidebar_visible ? FOCUS_SIDEBAR : FOCUS_EDITOR;
             if (E.sidebar_visible) tree_refresh();
+        } else if (key == 'f') {
+            E.pending_f = 1;
+        } else if (key == 'r') {
+            tools_run_current();
+        } else if (key == 't') {
+            tools_spawn_shell();
+        } else if (key == 'v') {
+            cmd_execute("vsplit");
+        } else if (key == 's') {
+            cmd_execute("split");
+        } else if (key == 'x') {
+            cmd_execute("only");
+        } else if (key == 'p') {
+            plugins_status();
+        } else if (key == 'g') {
+            tools_git_status();
         } else if (key == 'w') {
             buf_save(b, NULL);
         } else if (key == 'q') {
@@ -538,12 +585,24 @@ static void handle_normal_key(int key, const char *ubuf) {
         return;
     }
 
+    if (E.pending_c) {
+        E.pending_c = 0;
+        if (key == 'c') {
+            tools_toggle_comment(b, b->cy, b->cy);
+        }
+        return;
+    }
+
     if (E.pending_g) {
         E.pending_g = 0;
         if (key == 'g') {
             b->cy = 0;
             b->cx = 0;
             clamp_cursor(b);
+        } else if (key == 'c') {
+            E.pending_c = 1;
+        } else if (key == 'f') {
+            tools_jump_grep_line(b);
         }
         return;
     }
@@ -678,6 +737,36 @@ static void handle_normal_key(int key, const char *ubuf) {
             E.focus = E.sidebar_visible ? FOCUS_SIDEBAR : FOCUS_EDITOR;
             if (E.sidebar_visible) tree_refresh();
             break;
+        case KEY_F5:
+            tools_run_current();
+            break;
+        case CTRL_KEY('p'):
+            tools_fuzzy_find();
+            break;
+        case CTRL_KEY('j'):
+            tools_toggle_output();
+            break;
+        case CTRL_KEY('w'):
+            if (E.split_mode != SPLIT_NONE) {
+                int tmp = E.cur_buf;
+                E.cur_buf = E.split_buf;
+                E.split_buf = tmp;
+                E.active_pane = !E.active_pane;
+            } else if (E.sidebar_visible) {
+                E.focus = FOCUS_SIDEBAR;
+            }
+            break;
+        case 'm':
+            tools_toggle_bookmark(b, b->cy);
+            break;
+        case 'M':
+            tools_next_bookmark(b);
+            break;
+        case KEY_ENTER:
+            if (b->filename && strcmp(b->filename, "[Grep]") == 0) {
+                tools_jump_grep_line(b);
+            }
+            break;
         case CTRL_KEY('h'):
             if (E.sidebar_visible) E.focus = FOCUS_SIDEBAR;
             break;
@@ -753,6 +842,7 @@ int main(int argc, char **argv) {
     }
 
     tree_init(tree_root);
+    tools_refresh_git_branch();
     term_enable_raw();
     term_update_size();
     editor_set_status("catingiran v%s | :help for commands | Ctrl+B sidebar", CTI_VERSION);

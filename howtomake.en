@@ -1,6 +1,6 @@
 # catingiran (`cti`) Configuration & User Guide
 
-**catingiran** (`cti`) is a fast terminal TUI code editor written in pure C with Vim-style modal editing and command line, top bufferline tabs, syntax highlighting, a VS Code-style file explorer sidebar, and declarative configuration via `catingiran.conf`.
+**catingiran** (`cti`) is a fast terminal IDE and code editor written in pure C featuring Vim-style modal editing and command line, top bufferline tabs, syntax highlighting (**C/C++**, **Python**, **Java**, JS/TS, Shell/Conf), a VS Code-style file explorer sidebar, a built-in **plugin manager**, split panes, code runner, project grep, fuzzy file finder, and Git integration.
 
 ---
 
@@ -13,90 +13,81 @@ make
 sudo make install
 ```
 
-Both `cti` and `catingiran` commands will be installed (default prefix `/usr/local`).
+After installation:
+* Both `cti` and `catingiran` commands are available in `/usr/local/bin`.
+* Your editable preset config is created at `~/.config/catingiran/catingiran.conf`.
+* Plugins live in `~/.config/catingiran/plugins/`.
 
-To completely uninstall:
+To uninstall:
 ```sh
 sudo make uninstall
 ```
 
 ---
 
-## 2. Configuration File (`catingiran.conf`)
+## 2. Configuration (`catingiran.conf`)
 
-1. `make install` places the ready-made preset in `/usr/local/etc/catingiran.conf` and `/usr/local/share/catingiran/catingiran.conf`.
-2. On first run, `cti` automatically copies the preset to your personal config:
-   ```text
-   ~/.config/catingiran/catingiran.conf
-   ```
-3. You can edit it directly (`cti ~/.config/catingiran/catingiran.conf`) and apply changes live with `:reload`.
+Open your config right inside the editor with **`:conf`**:
+```text
+~/.config/catingiran/catingiran.conf
+```
+Reload config & plugins live at any time with **`:reload`**.
 
----
-
-## 3. All `catingiran.conf` Options
+### `catingiran.conf` Options
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `theme` | `charcoal` | Color theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
-| `tab_size` | `4` | Tab width (`1` to `16`) |
+| `theme` | `charcoal` | Theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `tab_size` | `4` | Tab width (`1`–`16`) |
 | `expand_tab` | `true` | Insert spaces instead of `\t` |
-| `line_numbers` | `true` | Display line numbers in the gutter |
-| `cursorline` | `true` | Highlight the current line |
-| `auto_indent` | `true` | Preserve indentation on new lines |
+| `line_numbers` | `true` | Show line numbers |
+| `cursorline` | `true` | Highlight current line |
+| `auto_indent` | `true` | Auto-indent new lines |
 | `auto_pairs` | `true` | Auto-close `()`, `[]`, `{}`, `""`, `''` |
-| `show_tabs` | `true` | Show the top bufferline tab bar |
-| `mouse` | `true` | Enable mouse clicks (tabs, sidebar, editor) and wheel scroll |
-| `sidebar_open` | `true` | Open the VS Code-style file explorer on startup |
-| `sidebar_width` | `28` | Sidebar width in columns (`16` to `60`) |
-| `show_hidden` | `true` | Show dotfiles in the file explorer |
-| `nerd_icons` | `true` | Render Nerd Font icons in the sidebar (`false` uses plain ASCII/Unicode) |
-| `russian_keymap` | `true` | Map Cyrillic keys in Normal/Command mode (`ж` -> `:`, `р/о/л/д` -> `h/j/k/l`) |
+| `show_tabs` | `true` | Show top bufferline tabs |
+| `mouse` | `true` | Enable mouse clicks & wheel scrolling |
+| `sidebar_open` | `true` | Open file explorer sidebar on startup |
+| `sidebar_width` | `28` | Sidebar width (`16`–`60`) |
+| `show_hidden` | `true` | Show dotfiles in sidebar |
+| `nerd_icons` | `true` | Nerd Font file/folder icons (`false` for ASCII/Unicode) |
+| `output_height` | `8` | Bottom output drawer height in lines (`4`–`30`) |
+| `git_branch` | `true` | Show Git branch in statusline |
+| `russian_keymap` | `true` | Cyrillic support in Normal/Command mode (`ж` -> `:`, `р/о/л/д` -> `h/j/k/l`) |
+| `plugin` | — | Add plugin: `plugin = user/repo` |
 
 ---
 
-## 4. Vim-Style Command Line (`:`)
+## 3. Built-in Plugin Manager (`catingiran Plug`)
 
-* `:w` / `:w <file>` — Save file (or Save As).
-* `:q` / `:q!` — Quit (or force quit discarding changes).
-* `:wq` / `:x` — Save and quit.
-* `:e <file>` — Open file in a new tab.
-* `:new` — Open a new empty tab.
-* `:bd` / `:c` — Close current tab.
-* `:t1` .. `:t9` — Jump to tab 1–9.
-* `:ot` — Open and focus the file explorer sidebar.
-* `:ht` — Hide the file explorer sidebar.
-* `:tree` — Toggle the file explorer sidebar.
-* `:theme <name>` — Switch theme live (`:themes` lists all themes).
-* `:set number` / `:set nonumber` — Toggle line numbers.
-* `:set icons` / `:set noicons` — Toggle Nerd Font icons.
-* `:set tabstop=N` — Set tab width dynamically.
-* `:reload` — Reload `catingiran.conf`.
-* `:help` — Open built-in quick help tab.
+Add plugins to `~/.config/catingiran/catingiran.conf`:
+```ini
+plugin = user/repo
+```
+Or install directly inside `cti` via `:PlugAdd user/repo`.
+
+Plugin commands:
+* `:PlugStatus` — view configured & installed plugins and registered commands.
+* `:PlugInstall` — clone configured plugins into `~/.config/catingiran/plugins/`.
+* `:PlugUpdate` — update installed plugins via `git pull`.
+* `:PlugClean` — remove plugins no longer listed in `catingiran.conf`.
+* `:PlugAdd user/repo` — append plugin to `catingiran.conf` and install it immediately.
 
 ---
 
-## 5. Keybindings
+## 4. Command Line (`:`) & Shortcuts (`<Space>` = Leader)
 
-### Editor (Normal Mode)
-* `h / j / k / l` or Arrow keys — Move cursor.
-* `w / b` — Next / previous word.
-* `0 / $` — Start / end of line.
-* `gg / G` — Top / bottom of file.
-* `i / a / o / O` — Enter Insert mode (`Esc` returns to Normal).
-* `v` — Visual line selection (`y` yank, `d` delete, `>` / `<` indent/unindent).
-* `dd / yy / p / u` — Delete line / Yank line / Paste / Undo.
-* `/pattern` — Search forward (`n` next match, `N` previous match).
-* `Ctrl + B` or `F2` or `Space + e` — Toggle file explorer sidebar.
-* `Ctrl + H` / `Ctrl + L` — Switch focus between sidebar and code editor.
-* `Tab` / `Shift + Tab` or `Space + 1..9` — Switch tabs.
-* `Space + w` / `Space + q` / `Space + c` — Save / Quit / Close tab.
-
-### File Explorer Sidebar (when focused)
-* `j / k` or Arrow keys — Navigate files and directories.
-* `Enter` or `l` — Open file in tab or expand/collapse folder.
-* `h` or `Backspace` — Collapse folder or move to parent directory.
-* `a` — Create new file (append `/` to create a directory).
-* `r` — Rename selected file/directory.
-* `d` — Delete file or empty directory (prompts `y/n`).
-* `H` — Toggle hidden dotfiles.
-* `R` — Refresh directory tree.
+* `:conf` / `:reload` — open `catingiran.conf` / reload config & plugins.
+* `:run` / `F5` / `Space + r` — compile & run current C/C++/Python/Java/Shell/Makefile file.
+* `:out` / `:ho` / `Ctrl + J` — show / hide / toggle bottom output drawer.
+* `:term` / `Space + t` — open interactive `$SHELL` and return back into `cti` on exit.
+* `:find` / `Ctrl + P` / `Space + ff` — fuzzy file finder across project.
+* `:grep <text>` / `Space + fg` — project-wide search (`Enter` or `gf` jumps to match).
+* `:git` / `:diff` / `Space + g` — Git status/log or unstaged diff.
+* `:stats` — project code statistics (files by language, lines, size, TODO/FIXME).
+* `:vsplit` / `:split` / `:only` / `Ctrl + W` — split panes & switch active pane.
+* `gcc` / `gc` (Visual) — toggle line comments (`//` or `#`).
+* `J` / `K` (Visual) — move selected lines down / up.
+* `m` / `M` — toggle bookmark (`★`) / jump to next bookmark.
+* `:ot` / `:ht` / `:tree` / `Ctrl + B` / `F2` — open / hide / toggle file explorer.
+* `:t1..:t9` / `Tab` / `Shift + Tab` — switch tabs.
+* `:theme <name>` / `:themes` — switch theme live.

@@ -4,9 +4,12 @@
 #include <stddef.h>
 #include <time.h>
 
-#define CTI_VERSION "0.1.0"
+#define CTI_VERSION "0.2.0"
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_BUFFERS 32
+#define MAX_PLUGINS 32
+#define MAX_PLUGIN_CMDS 64
+#define MAX_OUTPUT_LINES 200
 
 typedef enum {
     KEY_NULL = 0,
@@ -25,6 +28,7 @@ typedef enum {
     KEY_PAGE_DOWN,
     KEY_SHIFT_TAB,
     KEY_F2,
+    KEY_F5,
     KEY_MOUSE
 } EditorKey;
 
@@ -40,6 +44,12 @@ typedef enum {
     FOCUS_EDITOR = 0,
     FOCUS_SIDEBAR
 } FocusPane;
+
+typedef enum {
+    SPLIT_NONE = 0,
+    SPLIT_VERT,
+    SPLIT_HORIZ
+} SplitMode;
 
 typedef enum {
     HL_NORMAL = 0,
@@ -92,6 +102,19 @@ typedef struct {
 } Theme;
 
 typedef struct {
+    char spec[128];
+    char name[64];
+    char url[256];
+    int installed;
+} PluginSpec;
+
+typedef struct {
+    char name[48];
+    char shell_cmd[256];
+    char plugin_name[64];
+} PluginCommand;
+
+typedef struct {
     char theme[32];
     int tab_size;
     int expand_tab;
@@ -106,6 +129,10 @@ typedef struct {
     int nerd_icons;
     int russian_keymap;
     int show_tabs;
+    int output_height;
+    int git_branch;
+    PluginSpec plugins[MAX_PLUGINS];
+    int num_plugins;
 } Config;
 
 typedef struct {
@@ -115,6 +142,7 @@ typedef struct {
     unsigned char *hl;
     int hl_cap;
     int hl_open_comment;
+    int bookmarked;
 } Line;
 
 typedef enum {
@@ -181,13 +209,21 @@ typedef struct {
     Buffer buffers[MAX_BUFFERS];
     int num_buffers;
     int cur_buf;
+    SplitMode split_mode;
+    int split_buf;
+    int active_pane; /* 0 = primary, 1 = secondary */
     TreeNode *tree;
     int tree_len;
     int tree_cap;
     int tree_sel;
     int tree_scroll;
     char root_dir[1024];
+    char git_branch[64];
     int sidebar_visible;
+    int output_visible;
+    char output_lines[MAX_OUTPUT_LINES][256];
+    int output_len;
+    char output_title[64];
     FocusPane focus;
     EditorMode mode;
     char cmd_buf[512];
@@ -206,12 +242,15 @@ typedef struct {
     int pending_g;
     int pending_d;
     int pending_y;
+    int pending_c;
     int pending_leader;
-    int pending_del_confirm;
+    int pending_f;
     int quit_warn;
     MouseEvent last_mouse;
     Config cfg;
     Theme theme;
+    PluginCommand plugin_cmds[MAX_PLUGIN_CMDS];
+    int num_plugin_cmds;
     int running;
 } EditorState;
 
@@ -245,6 +284,7 @@ int buf_cx_to_rx(Buffer *b, int cy, int cx);
 void buf_init_empty(Buffer *b);
 void buf_free(Buffer *b);
 int buf_open(const char *filename);
+int buf_open_scratch(const char *title, const char *content, int syntax_id);
 int buf_save(Buffer *b, const char *new_name);
 void buf_close(int idx, int force);
 void buf_insert_bytes(Buffer *b, const char *s, int len);
@@ -255,6 +295,8 @@ void buf_delete_line(Buffer *b, int row);
 void buf_indent_line(Buffer *b, int row, int delta);
 void buf_undo(Buffer *b);
 void buf_find(Buffer *b, const char *query, int dir);
+void buf_raw_insert_at(Buffer *b, int row, int col, const char *s, int len);
+void buf_raw_delete_at(Buffer *b, int row, int col, int len);
 
 /* syntax.c */
 int syntax_detect(const char *filename);
@@ -280,5 +322,34 @@ void editor_prompt_input(const char *prompt, char *out, int out_sz);
 /* commands.c */
 void cmd_execute(const char *cmd);
 void cmd_autocomplete(char *buf, int *len, int *pos, int max_sz);
+
+/* plugins.c */
+void plugins_get_dir(char *buf, size_t sz);
+void plugins_load_all(void);
+void plugins_install(void);
+void plugins_update(void);
+void plugins_clean(void);
+void plugins_status(void);
+void plugins_add(const char *spec);
+int plugins_try_command(const char *cmd);
+
+/* tools.c */
+void tools_clear_output(const char *title);
+void tools_append_output(const char *line);
+void tools_run_current(void);
+void tools_toggle_output(void);
+void tools_spawn_shell(void);
+void tools_grep(const char *query);
+void tools_fuzzy_find(void);
+void tools_git_status(void);
+void tools_git_diff(void);
+void tools_refresh_git_branch(void);
+void tools_project_stats(void);
+void tools_toggle_comment(Buffer *b, int start_row, int end_row);
+void tools_duplicate_line(Buffer *b);
+void tools_move_lines(Buffer *b, int start_row, int end_row, int dir);
+void tools_toggle_bookmark(Buffer *b, int row);
+void tools_next_bookmark(Buffer *b);
+void tools_jump_grep_line(Buffer *b);
 
 #endif /* CATINGIRAN_STATE_H */

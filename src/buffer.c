@@ -145,6 +145,16 @@ static void line_raw_delete(Buffer *b, int row, int col, int len) {
     syntax_update_line(b, row);
 }
 
+void buf_raw_insert_at(Buffer *b, int row, int col, const char *s, int len) {
+    line_raw_insert(b, row, col, s, len);
+    b->dirty++;
+}
+
+void buf_raw_delete_at(Buffer *b, int row, int col, int len) {
+    line_raw_delete(b, row, col, len);
+    b->dirty++;
+}
+
 void buf_init_empty(Buffer *b) {
     memset(b, 0, sizeof(Buffer));
     b->undo_recording = 1;
@@ -219,6 +229,50 @@ int buf_open(const char *filename) {
     syntax_update_all(b);
     b->dirty = 0;
     E.cur_buf = slot;
+    return slot;
+}
+
+int buf_open_scratch(const char *title, const char *content, int syntax_id) {
+    int slot = -1;
+    for (int i = 0; i < E.num_buffers; i++) {
+        if (E.buffers[i].filename && strcmp(E.buffers[i].filename, title) == 0) {
+            buf_free(&E.buffers[i]);
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        if (E.num_buffers < MAX_BUFFERS) {
+            slot = E.num_buffers++;
+        } else {
+            slot = MAX_BUFFERS - 1;
+            buf_free(&E.buffers[slot]);
+        }
+    }
+
+    Buffer *b = &E.buffers[slot];
+    memset(b, 0, sizeof(Buffer));
+    b->undo_recording = 0;
+    b->readonly = 1;
+    b->filename = strdup(title);
+    b->syntax_id = syntax_id;
+
+    const char *p = content ? content : "";
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        int len = nl ? (int)(nl - p) : (int)strlen(p);
+        buf_raw_insert_line(b, b->num_lines, p, len);
+        if (!nl) break;
+        p = nl + 1;
+    }
+    if (b->num_lines == 0) {
+        buf_raw_insert_line(b, 0, "", 0);
+    }
+    syntax_update_all(b);
+    b->dirty = 0;
+    b->undo_recording = 1;
+    E.cur_buf = slot;
+    E.focus = FOCUS_EDITOR;
     return slot;
 }
 
