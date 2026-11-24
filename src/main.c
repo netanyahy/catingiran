@@ -429,6 +429,14 @@ static void handle_insert_key(int key, int ulen, const char *ubuf) {
             buf_delete_at_cursor(b);
             break;
         case KEY_TAB:
+            /* If cursor is right after an identifier, open autocomplete menu */
+            if (b->cx > 0 && (isalnum((unsigned char)b->lines[b->cy].chars[b->cx - 1]) ||
+                              b->lines[b->cy].chars[b->cx - 1] == '_' ||
+                              b->lines[b->cy].chars[b->cx - 1] == '#' ||
+                              b->lines[b->cy].chars[b->cx - 1] == '@')) {
+                ac_refresh(b, 1);
+                if (E.ac_visible) break;
+            }
             if (E.cfg.expand_tab) {
                 int ts = E.cfg.tab_size > 0 ? E.cfg.tab_size : 4;
                 char sp[17];

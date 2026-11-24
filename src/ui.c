@@ -530,8 +530,8 @@ void ui_render(void) {
             if (pop_col < 1) pop_col = 1;
 
             int pop_row = cur_row + 1;
-            if (pop_row + max_show >= E.screen_rows - 1 && cur_row - max_show > 1) {
-                pop_row = cur_row - max_show;
+            if (pop_row + max_show + 1 >= E.screen_rows - 1 && cur_row - max_show - 1 > 1) {
+                pop_row = cur_row - max_show - 1;
             }
 
             for (int i = 0; i < max_show; i++) {
@@ -553,6 +553,14 @@ void ui_render(void) {
                 int ew = ab_append_utf8_cols(&ab, entry, (int)strlen(entry), pop_w);
                 if (ew < pop_w) append_spaces(&ab, pop_w - ew);
                 ab_append_str(&ab, "\x1b[22m");
+            }
+            if (pop_row + max_show < E.screen_rows - 1) {
+                ab_append_fmt(&ab, "\x1b[%d;%dH", pop_row + max_show, pop_col);
+                ab_append_bg(&ab, E.theme.border_fg);
+                ab_append_fg(&ab, E.theme.tab_fg);
+                const char *hint = " Tab/S-Tab: select  Enter: OK ";
+                int hw = ab_append_utf8_cols(&ab, hint, (int)strlen(hint), pop_w);
+                if (hw < pop_w) append_spaces(&ab, pop_w - hw);
             }
         }
 
