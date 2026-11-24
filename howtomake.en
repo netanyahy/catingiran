@@ -1,0 +1,102 @@
+# catingiran (`cti`) Configuration & User Guide
+
+**catingiran** (`cti`) is a fast terminal TUI code editor written in pure C with Vim-style modal editing and command line, top bufferline tabs, syntax highlighting, a VS Code-style file explorer sidebar, and declarative configuration via `catingiran.conf`.
+
+---
+
+## 1. Build, Install & Uninstall
+
+```sh
+git clone https://github.com/netanyahy/catingiran.git
+cd catingiran
+make
+sudo make install
+```
+
+Both `cti` and `catingiran` commands will be installed (default prefix `/usr/local`).
+
+To completely uninstall:
+```sh
+sudo make uninstall
+```
+
+---
+
+## 2. Configuration File (`catingiran.conf`)
+
+1. `make install` places the ready-made preset in `/usr/local/etc/catingiran.conf` and `/usr/local/share/catingiran/catingiran.conf`.
+2. On first run, `cti` automatically copies the preset to your personal config:
+   ```text
+   ~/.config/catingiran/catingiran.conf
+   ```
+3. You can edit it directly (`cti ~/.config/catingiran/catingiran.conf`) and apply changes live with `:reload`.
+
+---
+
+## 3. All `catingiran.conf` Options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `theme` | `charcoal` | Color theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `tab_size` | `4` | Tab width (`1` to `16`) |
+| `expand_tab` | `true` | Insert spaces instead of `\t` |
+| `line_numbers` | `true` | Display line numbers in the gutter |
+| `cursorline` | `true` | Highlight the current line |
+| `auto_indent` | `true` | Preserve indentation on new lines |
+| `auto_pairs` | `true` | Auto-close `()`, `[]`, `{}`, `""`, `''` |
+| `show_tabs` | `true` | Show the top bufferline tab bar |
+| `mouse` | `true` | Enable mouse clicks (tabs, sidebar, editor) and wheel scroll |
+| `sidebar_open` | `true` | Open the VS Code-style file explorer on startup |
+| `sidebar_width` | `28` | Sidebar width in columns (`16` to `60`) |
+| `show_hidden` | `true` | Show dotfiles in the file explorer |
+| `nerd_icons` | `true` | Render Nerd Font icons in the sidebar (`false` uses plain ASCII/Unicode) |
+| `russian_keymap` | `true` | Map Cyrillic keys in Normal/Command mode (`ж` -> `:`, `р/о/л/д` -> `h/j/k/l`) |
+
+---
+
+## 4. Vim-Style Command Line (`:`)
+
+* `:w` / `:w <file>` — Save file (or Save As).
+* `:q` / `:q!` — Quit (or force quit discarding changes).
+* `:wq` / `:x` — Save and quit.
+* `:e <file>` — Open file in a new tab.
+* `:new` — Open a new empty tab.
+* `:bd` / `:c` — Close current tab.
+* `:t1` .. `:t9` — Jump to tab 1–9.
+* `:ot` — Open and focus the file explorer sidebar.
+* `:ht` — Hide the file explorer sidebar.
+* `:tree` — Toggle the file explorer sidebar.
+* `:theme <name>` — Switch theme live (`:themes` lists all themes).
+* `:set number` / `:set nonumber` — Toggle line numbers.
+* `:set icons` / `:set noicons` — Toggle Nerd Font icons.
+* `:set tabstop=N` — Set tab width dynamically.
+* `:reload` — Reload `catingiran.conf`.
+* `:help` — Open built-in quick help tab.
+
+---
+
+## 5. Keybindings
+
+### Editor (Normal Mode)
+* `h / j / k / l` or Arrow keys — Move cursor.
+* `w / b` — Next / previous word.
+* `0 / $` — Start / end of line.
+* `gg / G` — Top / bottom of file.
+* `i / a / o / O` — Enter Insert mode (`Esc` returns to Normal).
+* `v` — Visual line selection (`y` yank, `d` delete, `>` / `<` indent/unindent).
+* `dd / yy / p / u` — Delete line / Yank line / Paste / Undo.
+* `/pattern` — Search forward (`n` next match, `N` previous match).
+* `Ctrl + B` or `F2` or `Space + e` — Toggle file explorer sidebar.
+* `Ctrl + H` / `Ctrl + L` — Switch focus between sidebar and code editor.
+* `Tab` / `Shift + Tab` or `Space + 1..9` — Switch tabs.
+* `Space + w` / `Space + q` / `Space + c` — Save / Quit / Close tab.
+
+### File Explorer Sidebar (when focused)
+* `j / k` or Arrow keys — Navigate files and directories.
+* `Enter` or `l` — Open file in tab or expand/collapse folder.
+* `h` or `Backspace` — Collapse folder or move to parent directory.
+* `a` — Create new file (append `/` to create a directory).
+* `r` — Rename selected file/directory.
+* `d` — Delete file or empty directory (prompts `y/n`).
+* `H` — Toggle hidden dotfiles.
+* `R` — Refresh directory tree.
