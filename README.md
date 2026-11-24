@@ -37,3 +37,5 @@ sudo make uninstall
 * Русская инструкция: [howtomakeru.md](howtomakeru.md)
 * English guide: [howtomake.en](howtomake.en)
 * Пресет конфига: [catingiran.conf](catingiran.conf)
+Co-authored-by: Claude <81847+claude@users.noreply.github.com>
+Co-authored-by: Gemini <200291788+gemini-code-assist@users.noreply.github.com>
