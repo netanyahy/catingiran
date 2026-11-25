@@ -83,6 +83,7 @@ typedef struct {
     unsigned char r;
     unsigned char g;
     unsigned char b;
+    unsigned char trans; /* 1 = transparent terminal background (\x1b[49m) */
 } Color;
 
 typedef struct {

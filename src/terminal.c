@@ -250,7 +250,11 @@ void ab_append_fg(Abuf *ab, Color c) {
 }
 
 void ab_append_bg(Abuf *ab, Color c) {
-    ab_append_fmt(ab, "\x1b[48;2;%u;%u;%um", c.r, c.g, c.b);
+    if (c.trans) {
+        ab_append_str(ab, "\x1b[49m");
+    } else {
+        ab_append_fmt(ab, "\x1b[48;2;%u;%u;%um", c.r, c.g, c.b);
+    }
 }
 
 void ab_free(Abuf *ab) {

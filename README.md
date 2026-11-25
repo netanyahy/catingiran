@@ -19,7 +19,7 @@
   * Нечёткий поиск файлов (`Ctrl+P` / `:find`) и поиск по проекту (`:grep` + `Enter`).
   * Git-ветка в статус-лайне, `:git`, `:diff`, статистика проекта `:stats`, закладки (`m`/`M`), комментарии (`gcc`/`gc`), терминал (`:term`).
 * **Встроенный менеджер плагинов (`catingiran Plug`)**: готовые пакеты (`python`, `c`, `java`, `web`, `git-extras`) и GitHub-плагины (`:PlugAdd user/repo`).
-* **Гибкая настройка**: 35+ параметров в `~/.config/catingiran/catingiran.conf` и 6 тем (`charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light`).
+* **Гибкая настройка**: 35+ параметров в `~/.config/catingiran/catingiran.conf` и 7 тем (`charcoal`, `obsidian`, `transparent` / `onvim`, `catppuccin`, `tokyonight`, `nord`, `light`).
 
 ## Установка и удаление
 

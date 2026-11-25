@@ -33,7 +33,7 @@ sudo make uninstall
 
 | Параметр | По умолчанию | Описание |
 | --- | --- | --- |
-| `theme` | `charcoal` | Тема оформления: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `theme` | `charcoal` | Тема оформления: `charcoal`, `obsidian`, `transparent` (`onvim`), `catppuccin`, `tokyonight`, `nord`, `light` |
 | `show_tabs` | `true` | Показывать верхнюю строку открытых вкладок |
 | `statusline` | `true` | Показывать нижнюю статусную строку |
 | `line_numbers` | `true` | Показывать номера строк в левом поле |

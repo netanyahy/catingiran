@@ -39,7 +39,7 @@ static void open_help_buffer(void) {
         "  :find / :grep x  Fuzzy quick-open / Search across project\n"
         "  :git / :diff     Show Git status/log or Git diff\n"
         "  :stats           Project code statistics & TODO count\n"
-        "  :theme <name>    charcoal, obsidian, catppuccin, tokyonight, nord, light\n"
+        "  :theme <name>    charcoal, obsidian, transparent, catppuccin, tokyonight, nord, light\n"
         "  :set <opt>       number, relativenumber, ignorecase, colorcolumn=N\n"
         "\n"
         "LSP & AUTOCOMPLETE\n"

@@ -198,14 +198,47 @@ static const Theme BUILTIN_THEMES[] = {
         .hl_preproc = {149, 56, 0},
         .hl_func = {9, 105, 218},
         .hl_match = {255, 220, 110}
+    },
+    /* 7. Transparent (OnVim transparent terminal background + monochrome slate) */
+    {
+        .name = "transparent",
+        .bg = {0, 0, 0, 1},
+        .fg = {224, 228, 234, 0},
+        .gutter_fg = {108, 113, 124, 0},
+        .gutter_bg = {0, 0, 0, 1},
+        .cursorline_bg = {36, 39, 46, 0},
+        .selection_bg = {54, 60, 72, 0},
+        .sidebar_bg = {0, 0, 0, 1},
+        .sidebar_fg = {192, 196, 206, 0},
+        .sidebar_sel_bg = {44, 48, 58, 0},
+        .sidebar_sel_fg = {255, 255, 255, 0},
+        .sidebar_dir_fg = {235, 238, 244, 0},
+        .border_fg = {48, 52, 62, 0},
+        .tab_bg = {22, 24, 29, 0},
+        .tab_fg = {132, 138, 150, 0},
+        .tab_active_bg = {42, 46, 56, 0},
+        .tab_active_fg = {246, 248, 252, 0},
+        .status_bg = {24, 26, 32, 0},
+        .status_fg = {210, 214, 222, 0},
+        .status_mode_bg = {230, 234, 240, 0},
+        .status_mode_fg = {18, 20, 24, 0},
+        .hl_comment = {116, 122, 132, 0},
+        .hl_kw1 = {242, 245, 250, 0},
+        .hl_kw2 = {178, 188, 206, 0},
+        .hl_string = {196, 202, 212, 0},
+        .hl_number = {212, 218, 228, 0},
+        .hl_preproc = {164, 174, 190, 0},
+        .hl_func = {234, 238, 245, 0},
+        .hl_match = {230, 234, 242, 0}
     }
 };
 
 #define NUM_THEMES (sizeof(BUILTIN_THEMES) / sizeof(BUILTIN_THEMES[0]))
 
 int theme_apply(const char *name, Theme *out) {
+    const char *lookup = (strcmp(name, "onvim") == 0) ? "transparent" : name;
     for (size_t i = 0; i < NUM_THEMES; i++) {
-        if (strcmp(BUILTIN_THEMES[i].name, name) == 0) {
+        if (strcmp(BUILTIN_THEMES[i].name, lookup) == 0) {
             *out = BUILTIN_THEMES[i];
             return 1;
         }
@@ -214,7 +247,7 @@ int theme_apply(const char *name, Theme *out) {
 }
 
 const char *theme_list_names(void) {
-    return "charcoal, obsidian, catppuccin, tokyonight, nord, light";
+    return "charcoal, obsidian, transparent, catppuccin, tokyonight, nord, light";
 }
 
 void config_init_defaults(Config *cfg) {

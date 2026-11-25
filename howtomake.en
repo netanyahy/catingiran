@@ -33,7 +33,7 @@ Open your config directly inside the editor with **`:conf`**, and apply edits wi
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `theme` | `charcoal` | Color theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `theme` | `charcoal` | Color theme: `charcoal`, `obsidian`, `transparent` (`onvim`), `catppuccin`, `tokyonight`, `nord`, `light` |
 | `show_tabs` | `true` | Show top bufferline tabs |
 | `statusline` | `true` | Show bottom mode/file/Git statusline |
 | `line_numbers` | `true` | Show gutter line numbers |

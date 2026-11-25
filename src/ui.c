@@ -30,6 +30,13 @@ static int match_substr(const char *s, const char *q, int qlen, int ci) {
 }
 
 static Color shade_bg(Color c, int delta) {
+    if (c.trans) {
+        int r = 14 + delta, g = 16 + delta, b = 20 + delta;
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+        return (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b, 0};
+    }
     int bright = (int)c.r + (int)c.g + (int)c.b;
     int d = (bright > 384) ? -delta : delta;
     int r = (int)c.r + d;
@@ -41,7 +48,7 @@ static Color shade_bg(Color c, int delta) {
     if (g > 255) g = 255;
     if (b < 0) b = 0;
     if (b > 255) b = 255;
-    return (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b};
+    return (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b, 0};
 }
 
 static void append_spaces(Abuf *ab, int count) {
@@ -279,7 +286,7 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
     /* Gutter */
     ab_append_bg(ab, is_cur_line ? E.theme.cursorline_bg : E.theme.gutter_bg);
     if (ln->diag_level == 2) {
-        Color err_c = {243, 139, 168};
+        Color err_c = {243, 139, 168, 0};
         ab_append_fg(ab, err_c);
     } else if (ln->diag_level == 1 || ln->bookmarked) {
         ab_append_fg(ab, E.theme.hl_match);
@@ -337,7 +344,7 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
     Color cc_bg = shade_bg(line_bg, 12);
     Color cw_bg = shade_bg(line_bg, 22);
     Color trail_bg = ((int)line_bg.r + line_bg.g + line_bg.b > 384)
-        ? (Color){245, 200, 200} : (Color){95, 40, 48};
+        ? (Color){245, 200, 200, 0} : (Color){95, 40, 48, 0};
 
     int match_hl_end = 0;
     int cw_hl_end = 0;
@@ -511,7 +518,7 @@ static void draw_cmdline(Abuf *ab) {
                  cur->lines[cur->cy].diag_level == 2 ? "[LSP Error]" : "[LSP Warn]",
                  cur->lines[cur->cy].diag_msg);
         ab_append_fg(ab, cur->lines[cur->cy].diag_level == 2
-                     ? (Color){243, 139, 168} : E.theme.hl_match);
+                     ? (Color){243, 139, 168, 0} : E.theme.hl_match);
         drawn = ab_append_utf8_cols(ab, dline, (int)strlen(dline), E.screen_cols);
     }
     if (drawn < E.screen_cols) append_spaces(ab, E.screen_cols - drawn);
