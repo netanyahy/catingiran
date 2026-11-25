@@ -48,5 +48,5 @@ sudo make uninstall
 * Лицензия (BSD-3-Clause): [LICENSE](LICENSE)
 
 ## Авторы и контрибьюторы / Contributors
-1. **Google Gemini** (`@gemini-code-assist`) — AI co-author (Antigravity)
-2. **[@netanyahy](https://github.com/netanyahy)** — автор и мейнтейнер проекта
+1. **[@netanyahy](https://github.com/netanyahy)** — автор идеи, создатель и мейнтейнер проекта
+2. **Google Gemini** (`@gemini-code-assist`) — AI co-author (Antigravity)
