@@ -50,3 +50,4 @@ sudo make uninstall
 ## Авторы и контрибьюторы / Contributors
 * **[@netanyahy](https://github.com/netanyahy)** — автор и мейнтейнер проекта
 * **Google Gemini** (`@gemini-code-assist`) — AI co-author (Antigravity)
+* **Anthropic Claude** (`@claude`) — AI co-author (Claude Code)
