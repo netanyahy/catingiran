@@ -193,6 +193,9 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
         if (uc == 0) {
         return KEY_CTRL_SPACE;
     }
+    if (uc == 3) {
+        return KEY_ESC;
+    }
 
     utf8_buf[0] = c;
         int got = 1;
@@ -208,6 +211,9 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
 
     if (uc == 0) {
         return KEY_CTRL_SPACE;
+    }
+    if (uc == 3) {
+        return KEY_ESC;
     }
 
     utf8_buf[0] = c;
