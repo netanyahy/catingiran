@@ -417,9 +417,15 @@ void cmd_execute(const char *raw) {
     if (strncmp(cmd, "theme ", 6) == 0) {
         char *arg = cmd + 6;
         while (*arg && isspace((unsigned char)*arg)) arg++;
+        size_t alen = strlen(arg);
+        while (alen > 0 && isspace((unsigned char)arg[alen - 1])) arg[--alen] = '\0';
         if (theme_apply(arg, &E.theme)) {
-            snprintf(E.cfg.theme, sizeof(E.cfg.theme), "%s", arg);
-            editor_set_status("Theme applied: %s", arg);
+            snprintf(E.cfg.theme, sizeof(E.cfg.theme), "%s", E.theme.name);
+            if (config_set_key("theme", E.theme.name)) {
+                editor_set_status("Theme applied & saved: %s", E.theme.name);
+            } else {
+                editor_set_status("Theme applied: %s", E.theme.name);
+            }
         } else {
             editor_set_status("Unknown theme '%s'. Available: %s", arg, theme_list_names());
         }

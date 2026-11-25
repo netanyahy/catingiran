@@ -511,3 +511,50 @@ void config_load(Config *cfg) {
     }
     plugins_load_all();
 }
+
+int config_set_key(const char *key, const char *val) {
+    if (!key || !key[0] || !val) return 0;
+    char user_conf[1024];
+    config_get_user_path(user_conf, sizeof(user_conf));
+    copy_preset_if_missing(user_conf);
+
+    FILE *f = fopen(user_conf, "r");
+    Abuf out = {NULL, 0, 0};
+    int replaced = 0;
+    size_t klen = strlen(key);
+
+    if (f) {
+        char line[1024];
+        while (fgets(line, sizeof(line), f)) {
+            char *p = line;
+            while (*p == ' ' || *p == '\t') p++;
+            if (!replaced && *p != '#' && *p != ';' &&
+                strncmp(p, key, klen) == 0) {
+                char *after = p + klen;
+                while (*after == ' ' || *after == '\t') after++;
+                if (*after == '=') {
+                    ab_append_fmt(&out, "%s = %s\n", key, val);
+                    replaced = 1;
+                    continue;
+                }
+            }
+            ab_append_str(&out, line);
+        }
+        fclose(f);
+    }
+
+    if (!replaced) {
+        if (out.len > 0 && out.b[out.len - 1] != '\n') ab_append_str(&out, "\n");
+        ab_append_fmt(&out, "%s = %s\n", key, val);
+    }
+
+    FILE *wf = fopen(user_conf, "wb");
+    if (!wf) {
+        ab_free(&out);
+        return 0;
+    }
+    if (out.len > 0) fwrite(out.b, 1, (size_t)out.len, wf);
+    int ok = (fclose(wf) == 0);
+    ab_free(&out);
+    return ok;
+}

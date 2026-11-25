@@ -405,6 +405,7 @@ void config_load(Config *cfg);
 int theme_apply(const char *name, Theme *out);
 const char *theme_list_names(void);
 void config_get_user_path(char *buf, size_t sz);
+int config_set_key(const char *key, const char *val);
 
 /* buffer.c */
 int utf8_char_len(unsigned char c);
