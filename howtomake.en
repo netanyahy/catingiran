@@ -126,7 +126,8 @@ LSP features:
 ## 6. Commands & Shortcuts (`<Space>` = Leader)
 
 * `:w [file]`, `:q`, `:q!`, `:wq`, `:x`, `:e file`, `:new`, `:bd`, `:bn`, `:bp`, `:t1`..`:t9`
-* `:ot`, `:ht`, `:tree` / `Ctrl + B` / `F2` / `Space + e` — file explorer (`H` hidden, `a` create, `r` rename, `d` delete).
+* `:ot [dir]`, `:ht`, `:tree` / `Ctrl + B` / `F2` / `Space + e` — file explorer (`:ot ~/dir` sets tree root, `H` hidden, `a` create, `r` rename, `d` delete).
+* CLI launch modes: `cti` (opens explorer in `.`), `cti file` (sidebar stays hidden; `Ctrl+B` opens file's folder), `cti -ot [dir] [file]` (force sidebar open), `cti -ht [args...]` (force sidebar hidden).
 * `:vsplit`, `:split`, `:only` / `Ctrl + W` / `Space + v/s/x` — split panes.
 * `:run` / `F5` / `Space + rr` — build & run current file; `Ctrl + J` (`:out`/`:ho`) — output drawer.
 * `:find` / `Ctrl + P` / `Space + ff` — fuzzy file finder; `:grep text` / `Space + fg` — project grep (`Enter`/`gf` jump).

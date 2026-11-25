@@ -32,7 +32,10 @@ sudo make install   # на Gentoo с doas: doas make install
 
 Запуск и личный конфиг:
 ```sh
-cti
+cti                         # старт в текущей папке (с проводником файлов)
+cti /path/to/file           # открыть файл без автозапуска боковой панели
+cti /path/to/dir            # открыть проводник в указанной папке
+cti -ot /dir /path/to/file  # открыть файл + сразу открыть проводник в /dir
 ```
 Конфиг располагается в `~/.config/catingiran/catingiran.conf` (редактируется внутри IDE командой `:conf`, применяется без перезапуска через `:reload`).
 

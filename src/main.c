@@ -1338,32 +1338,92 @@ static void dispatch_key(int key, int ulen, const char *ubuf) {
     }
 }
 
+static int is_dir_path(const char *p) {
+    if (!p || !p[0]) return 0;
+    struct stat st;
+    return (stat(p, &st) == 0 && S_ISDIR(st.st_mode));
+}
+
+static void extract_parent_dir(const char *filepath, char *out, size_t out_sz) {
+    if (!filepath || !filepath[0]) {
+        snprintf(out, out_sz, ".");
+        return;
+    }
+    const char *sl = strrchr(filepath, '/');
+    if (!sl) {
+        snprintf(out, out_sz, ".");
+    } else if (sl == filepath) {
+        snprintf(out, out_sz, "/");
+    } else {
+        size_t len = (size_t)(sl - filepath);
+        if (len >= out_sz) len = out_sz - 1;
+        memcpy(out, filepath, len);
+        out[len] = '\0';
+    }
+}
+
 static void print_usage(void) {
     printf("catingiran (cti) v%s - Terminal IDE & Code Editor\n"
            "Usage: cti [options] [file|dir ...]\n"
            "Options:\n"
-           "  -h, --help      Show this help\n"
-           "  -v, --version   Show version\n",
+           "  -ot, --tree [dir]   Open file explorer sidebar (optionally in dir)\n"
+           "  -ht, --no-tree      Keep file explorer sidebar closed on startup\n"
+           "  -h, --help          Show this help\n"
+           "  -v, --version       Show version\n",
            CTI_VERSION);
 }
 
 int main(int argc, char **argv) {
+    int tree_flag = 0; /* 0 = auto, 1 = force open (-ot), -1 = force hide (-ht) */
+    const char *explicit_dir = NULL;
+    const char **file_args = malloc((size_t)(argc > 0 ? argc : 1) * sizeof(char *));
+    int n_files = 0;
+    int stop_opts = 0;
+
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            print_usage();
-            return 0;
+        if (!stop_opts && strcmp(argv[i], "--") == 0) {
+            stop_opts = 1;
+            continue;
         }
-        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
-            printf("catingiran (cti) %s\n", CTI_VERSION);
-            return 0;
+        if (!stop_opts) {
+            if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+                free(file_args);
+                print_usage();
+                return 0;
+            }
+            if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+                free(file_args);
+                printf("catingiran (cti) %s\n", CTI_VERSION);
+                return 0;
+            }
+            if (strcmp(argv[i], "-ot") == 0 || strcmp(argv[i], "--tree") == 0) {
+                tree_flag = 1;
+                if (i + 1 < argc && is_dir_path(argv[i + 1])) {
+                    explicit_dir = argv[++i];
+                }
+                continue;
+            }
+            if (strncmp(argv[i], "-ot=", 4) == 0 || strncmp(argv[i], "--tree=", 7) == 0) {
+                const char *d = (argv[i][1] == 'o') ? (argv[i] + 4) : (argv[i] + 7);
+                tree_flag = 1;
+                if (d[0]) explicit_dir = d;
+                continue;
+            }
+            if (strcmp(argv[i], "-ht") == 0 || strcmp(argv[i], "--no-tree") == 0) {
+                tree_flag = -1;
+                continue;
+            }
+        }
+        if (is_dir_path(argv[i])) {
+            if (!explicit_dir) explicit_dir = argv[i];
+        } else if (file_args) {
+            file_args[n_files++] = argv[i];
         }
     }
 
     memset(&E, 0, sizeof(E));
     config_load(&E.cfg);
 
-    E.sidebar_visible = E.cfg.sidebar_open_on_start;
-    E.focus = FOCUS_EDITOR;
     E.mode = MODE_NORMAL;
     E.running = 1;
 
@@ -1371,34 +1431,38 @@ int main(int argc, char **argv) {
     E.num_buffers = 1;
     E.cur_buf = 0;
 
-    const char *tree_root = ".";
-    for (int i = 1; i < argc; i++) {
-        struct stat st;
-        if (stat(argv[i], &st) == 0 && S_ISDIR(st.st_mode)) {
-            tree_root = argv[i];
-            E.sidebar_visible = 1;
-            E.focus = FOCUS_SIDEBAR;
-            break;
-        }
+    char tree_root[1024];
+    if (explicit_dir && is_dir_path(explicit_dir)) {
+        snprintf(tree_root, sizeof(tree_root), "%s", explicit_dir);
+    } else if (n_files > 0) {
+        extract_parent_dir(file_args[0], tree_root, sizeof(tree_root));
+    } else {
+        snprintf(tree_root, sizeof(tree_root), ".");
     }
+
+    if (tree_flag == 1) {
+        E.sidebar_visible = 1;
+    } else if (tree_flag == -1) {
+        E.sidebar_visible = 0;
+    } else if (explicit_dir) {
+        E.sidebar_visible = 1;
+    } else if (n_files > 0) {
+        E.sidebar_visible = 0;
+    } else {
+        E.sidebar_visible = E.cfg.sidebar_open_on_start;
+    }
+
+    E.focus = (E.sidebar_visible && n_files == 0 && (explicit_dir || tree_flag == 1))
+              ? FOCUS_SIDEBAR : FOCUS_EDITOR;
 
     tree_init(tree_root);
     tools_refresh_git_branch();
     lsp_init_all();
 
-    int opened_any_file = 0;
-    for (int i = 1; i < argc; i++) {
-        struct stat st;
-        if (!(stat(argv[i], &st) == 0 && S_ISDIR(st.st_mode))) {
-            buf_open(argv[i]);
-            opened_any_file = 1;
-        }
+    for (int i = 0; i < n_files; i++) {
+        buf_open(file_args[i]);
     }
-
-    if (!opened_any_file && argc > 1) {
-        /* Opened a directory */
-        E.focus = FOCUS_SIDEBAR;
-    }
+    free(file_args);
 
     term_enable_raw();
     term_update_size();

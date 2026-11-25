@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static int has_dirty_buffers(void) {
     for (int i = 0; i < E.num_buffers; i++) {
@@ -28,7 +29,7 @@ static void open_help_buffer(void) {
         "  :%s/a/b/g        Replace all 'a' with 'b' (:s/a/b/g for line)\n"
         "  :conf / :reload  Edit or reload ~/.config/catingiran/catingiran.conf\n"
         "  :t1 .. :t9       Jump to tab 1..9 (also :e1..:e9 in RU)\n"
-        "  :ot / :ht / :tree Open / Hide / Toggle file explorer\n"
+        "  :ot [dir] / :ht  Open explorer (in dir) / Hide / :tree Toggle\n"
         "  :vsplit / :split Vertical / Horizontal split (:only to close)\n"
         "  :ft <lang>       Set language syntax (python, c, java, js, sh, conf)\n"
         "  :lint / :fmt     Check syntax errors / Format current file\n"
@@ -187,11 +188,38 @@ void cmd_execute(const char *raw) {
         return;
     }
 
-    /* Sidebar commands :ot / :ht / :tree (+ Russian :от / :нт) */
+    /* Sidebar commands :ot [dir] / :ht / :tree (+ Russian :от / :нт) */
+    const char *ot_arg = NULL;
     if (strcmp(cmd, "ot") == 0 || strcmp(cmd, "Ot") == 0 || strcmp(cmd, "от") == 0) {
+        ot_arg = "";
+    } else if (strncmp(cmd, "ot ", 3) == 0 || strncmp(cmd, "Ot ", 3) == 0) {
+        ot_arg = cmd + 3;
+    } else if (strncmp(cmd, "от ", strlen("от ")) == 0) {
+        ot_arg = cmd + strlen("от ");
+    }
+    if (ot_arg) {
+        while (*ot_arg && isspace((unsigned char)*ot_arg)) ot_arg++;
+        if (ot_arg[0]) {
+            char resolved[1024];
+            if (ot_arg[0] == '~' && (ot_arg[1] == '\0' || ot_arg[1] == '/')) {
+                const char *home = getenv("HOME");
+                snprintf(resolved, sizeof(resolved), "%s%s",
+                         home ? home : ".", ot_arg + 1);
+            } else {
+                snprintf(resolved, sizeof(resolved), "%s", ot_arg);
+            }
+            struct stat st;
+            if (stat(resolved, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                editor_set_status("Not a directory: %s", resolved);
+                return;
+            }
+            tree_init(resolved);
+            tools_refresh_git_branch();
+        } else {
+            tree_refresh();
+        }
         E.sidebar_visible = 1;
         E.focus = FOCUS_SIDEBAR;
-        tree_refresh();
         return;
     }
     if (strcmp(cmd, "ht") == 0 || strcmp(cmd, "Ht") == 0 || strcmp(cmd, "нт") == 0) {
