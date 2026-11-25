@@ -190,14 +190,7 @@ int term_read_key(int *utf8_bytes_out, char utf8_buf[5]) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 0xC0) {
         int expected = utf8_char_len(uc);
-        if (uc == 0) {
-        return KEY_CTRL_SPACE;
-    }
-    if (uc == 3) {
-        return KEY_ESC;
-    }
-
-    utf8_buf[0] = c;
+        utf8_buf[0] = c;
         int got = 1;
         while (got < expected) {
             char next_c;
