@@ -1,10 +1,48 @@
 #include "state.h"
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static int is_ident_byte(unsigned char c) {
+    return isalnum(c) || c == '_';
+}
+
+static int search_use_ci(const char *q) {
+    if (!E.cfg.ignore_case) return 0;
+    if (E.cfg.smart_case && q) {
+        for (int i = 0; q[i]; i++) {
+            if (isupper((unsigned char)q[i])) return 0;
+        }
+    }
+    return 1;
+}
+
+static int match_substr(const char *s, const char *q, int qlen, int ci) {
+    if (!ci) return strncmp(s, q, (size_t)qlen) == 0;
+    for (int i = 0; i < qlen; i++) {
+        if (tolower((unsigned char)s[i]) != tolower((unsigned char)q[i])) return 0;
+    }
+    return 1;
+}
+
+static Color shade_bg(Color c, int delta) {
+    int bright = (int)c.r + (int)c.g + (int)c.b;
+    int d = (bright > 384) ? -delta : delta;
+    int r = (int)c.r + d;
+    int g = (int)c.g + d;
+    int b = (int)c.b + d;
+    if (r < 0) r = 0;
+    if (r > 255) r = 255;
+    if (g < 0) g = 0;
+    if (g > 255) g = 255;
+    if (b < 0) b = 0;
+    if (b > 255) b = 255;
+    return (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b};
+}
 
 static void append_spaces(Abuf *ab, int count) {
     for (int i = 0; i < count; i++) ab_append(ab, " ", 1);
@@ -59,8 +97,15 @@ static void scroll_editor(Buffer *b, int ed_rows, int ed_cols) {
     int text_cols = ed_cols - gutter_w;
     if (text_cols < 1) text_cols = 1;
 
-    if (b->cy < b->rowoff) b->rowoff = b->cy;
-    if (b->cy >= b->rowoff + ed_rows) b->rowoff = b->cy - ed_rows + 1;
+    int so = E.cfg.scrolloff;
+    if (so < 0) so = 0;
+    if (so * 2 >= ed_rows) so = (ed_rows > 1) ? (ed_rows - 1) / 2 : 0;
+
+    if (b->cy < b->rowoff + so) b->rowoff = b->cy - so;
+    if (b->cy >= b->rowoff + ed_rows - so) b->rowoff = b->cy - ed_rows + 1 + so;
+    if (b->rowoff < 0) b->rowoff = 0;
+    int max_off = b->num_lines > 0 ? b->num_lines - 1 : 0;
+    if (b->rowoff > max_off) b->rowoff = max_off;
 
     int rx = buf_cx_to_rx(b, b->cy, b->cx);
     if (rx < b->coloff) b->coloff = rx;
@@ -248,14 +293,54 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
 
     if (E.cfg.line_numbers) {
         char gbuf[16];
-        snprintf(gbuf, sizeof(gbuf), "%4d%s", file_row + 1, mark);
+        int num = file_row + 1;
+        if (E.cfg.relative_numbers && is_active_pane && file_row != b->cy) {
+            num = abs(file_row - b->cy);
+        }
+        snprintf(gbuf, sizeof(gbuf), "%4d%s", num, mark);
         ab_append_str(ab, gbuf);
     } else {
         ab_append_str(ab, mark[0] == ' ' ? " " : mark);
     }
 
-    int slen = (E.search_len > 0) ? E.search_len : 0;
+    int slen = (E.cfg.hl_search && E.search_len > 0) ? E.search_len : 0;
+    int search_ci = slen > 0 ? search_use_ci(E.search_buf) : 0;
 
+    char cw[64];
+    int cw_len = 0;
+    if (E.cfg.highlight_current_word && is_active_pane && E.focus == FOCUS_EDITOR &&
+        b->cy >= 0 && b->cy < b->num_lines) {
+        Line *cln = &b->lines[b->cy];
+        int pos = b->cx;
+        if (pos >= cln->size && pos > 0) pos--;
+        if (pos >= 0 && pos < cln->size && is_ident_byte((unsigned char)cln->chars[pos])) {
+            int s = pos, e = pos + 1;
+            while (s > 0 && is_ident_byte((unsigned char)cln->chars[s - 1])) s--;
+            while (e < cln->size && is_ident_byte((unsigned char)cln->chars[e])) e++;
+            int wl = e - s;
+            if (wl >= 2 && wl < (int)sizeof(cw)) {
+                memcpy(cw, cln->chars + s, (size_t)wl);
+                cw[wl] = '\0';
+                cw_len = wl;
+            }
+        }
+    }
+
+    int trail_start = ln->size;
+    if (E.cfg.trailing_whitespace) {
+        while (trail_start > 0 &&
+               (ln->chars[trail_start - 1] == ' ' || ln->chars[trail_start - 1] == '\t')) {
+            trail_start--;
+        }
+    }
+    int cc_vcol = E.cfg.colorcolumn > 0 ? (E.cfg.colorcolumn - 1) : -1;
+    Color cc_bg = shade_bg(line_bg, 12);
+    Color cw_bg = shade_bg(line_bg, 22);
+    Color trail_bg = ((int)line_bg.r + line_bg.g + line_bg.b > 384)
+        ? (Color){245, 200, 200} : (Color){95, 40, 48};
+
+    int match_hl_end = 0;
+    int cw_hl_end = 0;
     int rx = 0;
     int drawn = 0;
     int i = 0;
@@ -266,16 +351,33 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
         int clen = utf8_char_len(c);
         if (i + clen > ln->size) break;
 
-        int is_match = (slen > 0 && i + slen <= ln->size &&
-                        strncmp(ln->chars + i, E.search_buf, (size_t)slen) == 0);
+        if (slen > 0 && i >= match_hl_end && i + slen <= ln->size &&
+            match_substr(ln->chars + i, E.search_buf, slen, search_ci)) {
+            match_hl_end = i + slen;
+        }
+        int is_match = (i < match_hl_end);
+
+        if (cw_len > 0 && i >= cw_hl_end &&
+            (i == 0 || !is_ident_byte((unsigned char)ln->chars[i - 1])) &&
+            i + cw_len <= ln->size &&
+            (i + cw_len == ln->size || !is_ident_byte((unsigned char)ln->chars[i + cw_len])) &&
+            strncmp(ln->chars + i, cw, (size_t)cw_len) == 0) {
+            cw_hl_end = i + cw_len;
+        }
+        int is_cw = (i < cw_hl_end);
         int is_vis = in_visual_range(b, file_row, i);
+        int is_trail = (E.cfg.trailing_whitespace && i >= trail_start &&
+                        !(is_cur_line && E.mode == MODE_INSERT && b->cx == ln->size));
 
         if (c == '\t') {
             int ts = E.cfg.tab_size > 0 ? E.cfg.tab_size : 4;
             int spaces = ts - (rx % ts);
-            ab_append_bg(ab, is_vis ? E.theme.selection_bg : line_bg);
             for (int s = 0; s < spaces; s++) {
                 if (rx >= b->coloff && drawn < text_cols) {
+                    Color cbg = is_vis ? E.theme.selection_bg :
+                                (is_trail ? trail_bg :
+                                (rx == cc_vcol ? cc_bg : line_bg));
+                    ab_append_bg(ab, cbg);
                     ab_append(ab, " ", 1);
                     drawn++;
                 }
@@ -285,9 +387,9 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
             continue;
         }
 
-        int cw = (clen == 4) ? 2 : 1;
-        if (rx + cw > b->coloff) {
-            if (drawn + cw > text_cols) break;
+        int cw_cols = (clen == 4) ? 2 : 1;
+        if (rx + cw_cols > b->coloff) {
+            if (drawn + cw_cols > text_cols) break;
 
             if (is_match) {
                 ab_append_bg(ab, E.theme.hl_match);
@@ -295,37 +397,63 @@ static void draw_editor_row(Abuf *ab, Buffer *b, int is_active_pane, int rel_row
             } else if (is_vis) {
                 ab_append_bg(ab, E.theme.selection_bg);
                 ab_append_fg(ab, E.theme.fg);
+            } else if (is_trail) {
+                ab_append_bg(ab, trail_bg);
+                ab_append_fg(ab, E.theme.gutter_fg);
             } else {
-                ab_append_bg(ab, line_bg);
+                Color cell_bg = (rx == cc_vcol) ? cc_bg : (is_cw ? cw_bg : line_bg);
+                ab_append_bg(ab, cell_bg);
                 HlType hl = ln->hl ? (HlType)ln->hl[i] : HL_NORMAL;
                 ab_append_fg(ab, syntax_color(hl));
             }
             ab_append(ab, ln->chars + i, clen);
-            drawn += cw;
+            drawn += cw_cols;
         }
-        rx += cw;
+        rx += cw_cols;
         i += clen;
     }
 
     if (drawn < text_cols) {
-        ab_append_bg(ab, line_bg);
-        append_spaces(ab, text_cols - drawn);
+        int rem = text_cols - drawn;
+        int cc_drawn = (cc_vcol >= 0) ? (cc_vcol - b->coloff) : -1;
+        if (cc_drawn >= drawn && cc_drawn < text_cols) {
+            int pre = cc_drawn - drawn;
+            ab_append_bg(ab, line_bg);
+            if (pre > 0) append_spaces(ab, pre);
+            ab_append_bg(ab, cc_bg);
+            append_spaces(ab, 1);
+            int post = text_cols - cc_drawn - 1;
+            if (post > 0) {
+                ab_append_bg(ab, line_bg);
+                append_spaces(ab, post);
+            }
+        } else {
+            ab_append_bg(ab, line_bg);
+            append_spaces(ab, rem);
+        }
     }
 }
 
 static void draw_statusline(Abuf *ab, Buffer *b) {
-    const char *mode_str = " NORMAL ";
+    char mode_buf[32];
+    const char *base_mode = "NORMAL";
     if (E.focus == FOCUS_SIDEBAR && E.mode == MODE_NORMAL) {
-        mode_str = " TREE ";
+        base_mode = "TREE";
     } else if (E.mode == MODE_INSERT) {
-        mode_str = " INSERT ";
+        base_mode = "INSERT";
     } else if (E.mode == MODE_VISUAL) {
-        mode_str = " VISUAL ";
+        base_mode = "VISUAL";
     } else if (E.mode == MODE_COMMAND) {
-        mode_str = " COMMAND ";
+        base_mode = "COMMAND";
     } else if (E.mode == MODE_SEARCH) {
-        mode_str = " SEARCH ";
+        base_mode = "SEARCH";
     }
+    if (E.macro_recording) {
+        snprintf(mode_buf, sizeof(mode_buf), " %s [REC @%c] ", base_mode, E.macro_rec_reg ? E.macro_rec_reg : '?');
+    } else {
+        snprintf(mode_buf, sizeof(mode_buf), " %s ", base_mode);
+    }
+    const char *mode_str = mode_buf;
 
     ab_append_bg(ab, E.theme.status_mode_bg);
     ab_append_fg(ab, E.theme.status_mode_fg);
@@ -340,8 +468,8 @@ static void draw_statusline(Abuf *ab, Buffer *b) {
     snprintf(left, sizeof(left), " %s%s%s%s",
              b->filename ? b->filename : "[No Name]",
              b->dirty ? " [+]" : "",
-             E.git_branch[0] ? "   " : "",
-             E.git_branch[0] ? E.git_branch : "");
+             (E.cfg.git_branch && E.git_branch[0]) ? "   " : "",
+             (E.cfg.git_branch && E.git_branch[0]) ? E.git_branch : "");
 
     char right[192];
     int perc = b->num_lines > 0 ? ((b->cy + 1) * 100) / b->num_lines : 100;
@@ -366,6 +494,7 @@ static void draw_cmdline(Abuf *ab) {
     ab_append_bg(ab, E.theme.bg);
     ab_append_fg(ab, E.theme.fg);
 
+    Buffer *cur = (E.cur_buf >= 0 && E.cur_buf < E.num_buffers) ? &E.buffers[E.cur_buf] : NULL;
     int drawn = 0;
     if (E.mode == MODE_COMMAND) {
         ab_append_str(ab, ":");
@@ -375,6 +504,15 @@ static void draw_cmdline(Abuf *ab) {
         drawn = 1 + ab_append_utf8_cols(ab, E.search_buf, E.search_len, E.screen_cols - 1);
     } else if (E.status_msg[0] && time(NULL) - E.status_msg_time < 5) {
         drawn = ab_append_utf8_cols(ab, E.status_msg, (int)strlen(E.status_msg), E.screen_cols);
+    } else if (cur && cur->cy >= 0 && cur->cy < cur->num_lines &&
+               cur->lines[cur->cy].diag_level > 0 && cur->lines[cur->cy].diag_msg[0]) {
+        char dline[160];
+        snprintf(dline, sizeof(dline), "%s %s",
+                 cur->lines[cur->cy].diag_level == 2 ? "[LSP Error]" : "[LSP Warn]",
+                 cur->lines[cur->cy].diag_msg);
+        ab_append_fg(ab, cur->lines[cur->cy].diag_level == 2
+                     ? (Color){243, 139, 168} : E.theme.hl_match);
+        drawn = ab_append_utf8_cols(ab, dline, (int)strlen(dline), E.screen_cols);
     }
     if (drawn < E.screen_cols) append_spaces(ab, E.screen_cols - drawn);
 }
@@ -411,8 +549,9 @@ void ui_render(void) {
     if (E.split_buf < 0 || E.split_buf >= E.num_buffers) E.split_buf = E.cur_buf;
 
     int top_rows = E.cfg.show_tabs ? 1 : 0;
+    int status_rows = E.cfg.statusline ? 1 : 0;
     int out_h = (E.output_visible && E.screen_rows > 12) ? E.cfg.output_height : 0;
-    int body_rows = E.screen_rows - top_rows - 2 - out_h; /* statusline + cmdline + output */
+    int body_rows = E.screen_rows - top_rows - status_rows - 1 - out_h; /* statusline + cmdline + output */
     if (body_rows < 1) body_rows = 1;
 
     int sb_w = 0;
@@ -458,7 +597,7 @@ void ui_render(void) {
     }
 
     for (int r = 0; r < body_rows; r++) {
-        if (sb_w > 0) {
+        if (sb_w > 0 && !E.cfg.sidebar_right) {
             draw_sidebar_cell(&ab, r, sb_w);
             ab_append_bg(&ab, E.theme.bg);
             ab_append_fg(&ab, E.theme.border_fg);
@@ -483,6 +622,12 @@ void ui_render(void) {
         } else {
             draw_editor_row(&ab, b, 1, r, body_rows, ed_total_cols);
         }
+        if (sb_w > 0 && E.cfg.sidebar_right) {
+            ab_append_bg(&ab, E.theme.bg);
+            ab_append_fg(&ab, E.theme.border_fg);
+            ab_append_str(&ab, "│");
+            draw_sidebar_cell(&ab, r, sb_w);
+        }
         ab_append_str(&ab, "\r\n");
     }
 
@@ -491,8 +636,10 @@ void ui_render(void) {
         ab_append_str(&ab, "\r\n");
     }
 
-    draw_statusline(&ab, b);
-    ab_append_str(&ab, "\r\n");
+    if (E.cfg.statusline) {
+        draw_statusline(&ab, b);
+        ab_append_str(&ab, "\r\n");
+    }
     draw_cmdline(&ab);
 
     /* Position hardware cursor */
@@ -507,7 +654,7 @@ void ui_render(void) {
         ab_append_fmt(&ab, "\x1b[%d;%dH\x1b[?25h", cur_row, cur_col);
     } else if (E.focus == FOCUS_EDITOR) {
         int gutter_w = E.cfg.line_numbers ? 6 : 1;
-        int pane_col_off = sb_w + border_w;
+        int pane_col_off = E.cfg.sidebar_right ? 0 : (sb_w + border_w);
         int pane_row_off = top_rows;
         if (E.split_mode == SPLIT_VERT && p1_cols > 0 && E.active_pane == 1) {
             pane_col_off += p0_cols + 1;
@@ -561,6 +708,38 @@ void ui_render(void) {
                 const char *hint = " Tab/S-Tab: select  Enter: OK ";
                 int hw = ab_append_utf8_cols(&ab, hint, (int)strlen(hint), pop_w);
                 if (hw < pop_w) append_spaces(&ab, pop_w - hw);
+            }
+        }
+
+        /* Floating LSP Hover Card */
+        if (E.hover_visible && E.hover_count > 0 && E.mode == MODE_NORMAL && E.screen_cols > 24) {
+            int max_w = 18;
+            for (int i = 0; i < E.hover_count; i++) {
+                int lw = utf8_str_width(E.hover_lines[i], (int)strlen(E.hover_lines[i])) + 2;
+                if (lw > max_w) max_w = lw;
+            }
+            if (max_w > E.screen_cols - 4) max_w = E.screen_cols - 4;
+            if (max_w > 68) max_w = 68;
+            int hcol = cur_col;
+            if (hcol + max_w > E.screen_cols) hcol = E.screen_cols - max_w;
+            if (hcol < 1) hcol = 1;
+
+            int hrows = E.hover_count < 12 ? E.hover_count : 12;
+            int hrow = cur_row + 1;
+            if (hrow + hrows + 1 >= E.screen_rows - 1 && cur_row - hrows - 1 >= 1) {
+                hrow = cur_row - hrows - 1;
+            }
+            for (int i = 0; i < hrows; i++) {
+                int r = hrow + i;
+                if (r < 1 || r >= E.screen_rows - 1) continue;
+                ab_append_fmt(&ab, "\x1b[%d;%dH", r, hcol);
+                ab_append_bg(&ab, E.theme.sidebar_bg);
+                ab_append_fg(&ab, i == 0 ? E.theme.hl_match : E.theme.fg);
+                if (i == 0) ab_append_str(&ab, "\x1b[1m");
+                ab_append(&ab, " ", 1);
+                int w = ab_append_utf8_cols(&ab, E.hover_lines[i], (int)strlen(E.hover_lines[i]), max_w - 2);
+                if (w + 1 < max_w) append_spaces(&ab, max_w - 1 - w);
+                ab_append_str(&ab, "\x1b[22m");
             }
         }
 

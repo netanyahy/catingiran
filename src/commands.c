@@ -24,45 +24,44 @@ static void open_help_buffer(void) {
         "  :wq / :x         Save and quit\n"
         "  :e <file>        Open file in new tab\n"
         "  :new / :bd       New empty tab / Close current tab\n"
-        "  :conf            Edit ~/.config/catingiran/catingiran.conf\n"
-        "  :reload          Reload catingiran.conf & plugins\n"
+        "  :redo            Redo last undone edit (or Ctrl+R)\n"
+        "  :%s/a/b/g        Replace all 'a' with 'b' (:s/a/b/g for line)\n"
+        "  :conf / :reload  Edit or reload ~/.config/catingiran/catingiran.conf\n"
         "  :t1 .. :t9       Jump to tab 1..9 (also :e1..:e9 in RU)\n"
         "  :ot / :ht / :tree Open / Hide / Toggle file explorer\n"
         "  :vsplit / :split Vertical / Horizontal split (:only to close)\n"
         "  :ft <lang>       Set language syntax (python, c, java, js, sh, conf)\n"
         "  :lint / :fmt     Check syntax errors / Format current file\n"
+        "  :lsp             Show LSP server status (clangd, pyright, jdtls)\n"
         "  :run             Compile & run current C/C++/Python/Java/Sh file\n"
         "  :out / :ho       Show / Hide bottom output drawer\n"
         "  :term            Open interactive shell ($SHELL)\n"
-        "  :find            Fuzzy quick-open file in project\n"
-        "  :grep <text>     Search across project (Enter on line jumps)\n"
+        "  :find / :grep x  Fuzzy quick-open / Search across project\n"
         "  :git / :diff     Show Git status/log or Git diff\n"
         "  :stats           Project code statistics & TODO count\n"
-        "  :theme <name>    Switch theme (" "charcoal, obsidian, catppuccin, tokyonight, nord, light" ")\n"
-        "  :set number      Line numbers (:set nonumber / icons / tabstop=N)\n"
+        "  :theme <name>    charcoal, obsidian, catppuccin, tokyonight, nord, light\n"
+        "  :set <opt>       number, relativenumber, ignorecase, colorcolumn=N\n"
         "\n"
-        "PLUGIN MANAGER (catingiran Plug)\n"
-        "  :PlugList        Browse official IDE packs (c, python, java, web...)\n"
-        "  :PlugStatus      View configured & installed plugins\n"
-        "  :PlugAdd <name>  Install pack (:PlugAdd c/python/java) or GitHub u/repo\n"
-        "  :PlugCreate name Create your own custom plugin\n"
-        "  :PlugInstall     Clone plugins from catingiran.conf\n"
-        "  :PlugUpdate      Update installed plugins (git pull)\n"
-        "  :PlugClean       Remove plugins no longer in catingiran.conf\n"
+        "LSP & AUTOCOMPLETE\n"
+        "  Ctrl+Space       Trigger autocomplete popup (Tab/S-Tab/Enter)\n"
+        "  gd / gr          Go to LSP definition / Find LSP references\n"
+        "  K / Esc          Show LSP hover documentation popup / Dismiss\n"
+        "  Space + r n      LSP Rename symbol under cursor\n"
+        "  ]d / [d          Jump to next / previous lint/LSP diagnostic\n"
         "\n"
-        "KEYBINDINGS (NORMAL / INSERT / VISUAL)\n"
-        "  Ctrl+Space       Trigger autocomplete popup (Tab/Enter to accept)\n"
-        "  ]d / [d          Jump to next / previous lint diagnostic\n"
-        "  h / j / k / l    Move cursor (plus Russian layout support)\n"
+        "VIM OPERATORS, TEXT OBJECTS & MACROS\n"
+        "  <count>cmd       Counts: 5dd, 10j, 3k, 3w, 4x\n"
+        "  c/d/y + i/a + obj ciw, diw, yiw, di\", da\", di(, da(, di{, da{, vi(\n"
+        "  qa ... q / @a    Record macro into register a..z / Play macro\n"
+        "  u / Ctrl+R       Undo / Redo\n"
         "  gcc / gc(vis)    Toggle line comment (// or #)\n"
         "  J / K (visual)   Move selected lines down / up\n"
         "  m / M            Toggle bookmark (★) / Jump to next bookmark\n"
-        "  F5 / Space+r     Run current file\n"
+        "  F5 / Space+rr    Run current file\n"
         "  Ctrl+J           Toggle output drawer\n"
         "  Ctrl+P / Space+ff Fuzzy file finder\n"
         "  Ctrl+B / F2      Toggle file explorer sidebar\n"
-        "  Ctrl+W           Switch active split pane\n"
-        "  Ctrl+H / Ctrl+L  Focus sidebar / Focus code editor\n"
+        "  Ctrl+W / Ctrl+H/L Switch split pane / Focus sidebar or editor\n"
         "  Tab / Shift+Tab  Next / Previous tab\n"
         "  Space + 1..9     Jump to tab 1..9\n"
         "  Space + v / s / x Vertical split / Horizontal split / Close split\n"
@@ -74,11 +73,12 @@ static void open_help_buffer(void) {
 
 void cmd_autocomplete(char *buf, int *len, int *pos, int max_sz) {
     static const char *cmds[] = {
-        "w", "wq", "q", "q!", "x", "e ", "new", "bd", "ot", "ht", "tree",
-        "conf", "reload", "run", "out", "ho", "term", "find", "grep ",
+        "w", "wq", "q", "q!", "x", "e ", "new", "bd", "redo", "ot", "ht", "tree",
+        "conf", "reload", "run", "out", "ho", "term", "find", "grep ", "lsp",
         "git", "diff", "stats", "vsplit", "split", "only", "ft ", "lint", "fmt",
         "PlugList", "PlugStatus", "PlugInstall", "PlugUpdate", "PlugClean", "PlugAdd ", "PlugCreate ",
-        "theme ", "themes", "set number", "set nonumber", "set cursorline",
+        "theme ", "themes", "set number", "set nonumber", "set relativenumber",
+        "set ignorecase", "set smartcase", "set colorcolumn=", "set cursorline",
         "set nocursorline", "set icons", "set noicons", "help", NULL
     };
 
@@ -91,6 +91,53 @@ void cmd_autocomplete(char *buf, int *len, int *pos, int max_sz) {
             return;
         }
     }
+}
+
+static int handle_substitute(Buffer *b, const char *cmd) {
+    int whole_file = 0;
+    const char *p = NULL;
+    if (cmd[0] == '%' && cmd[1] == 's' && cmd[2]) {
+        whole_file = 1;
+        p = cmd + 2;
+    } else if (cmd[0] == 's' && cmd[1] && !isalnum((unsigned char)cmd[1])) {
+        p = cmd + 1;
+    } else {
+        return 0;
+    }
+
+    char delim = *p++;
+    if (!delim) return 0;
+
+    char old_s[256], new_s[256];
+    int oi = 0, ni = 0;
+    while (*p && *p != delim && oi < (int)sizeof(old_s) - 1) {
+        if (*p == '\\' && *(p + 1)) p++;
+        old_s[oi++] = *p++;
+    }
+    old_s[oi] = '\0';
+    if (*p != delim) {
+        editor_set_status("Syntax: :%%s/old/new/g");
+        return 1;
+    }
+    p++;
+    while (*p && *p != delim && ni < (int)sizeof(new_s) - 1) {
+        if (*p == '\\' && *(p + 1)) p++;
+        new_s[ni++] = *p++;
+    }
+    new_s[ni] = '\0';
+    if (*p == delim) p++;
+
+    if (!old_s[0]) {
+        editor_set_status("Empty search pattern");
+        return 1;
+    }
+    int n = buf_replace_all(b, old_s, new_s, !whole_file);
+    if (n > 0) {
+        editor_set_status("%d substitution(s) made", n);
+    } else {
+        editor_set_status("Pattern not found: %s", old_s);
+    }
+    return 1;
 }
 
 void cmd_execute(const char *raw) {
@@ -114,6 +161,17 @@ void cmd_execute(const char *raw) {
     }
 
     Buffer *b = &E.buffers[E.cur_buf];
+
+    if (handle_substitute(b, cmd)) return;
+
+    if (strcmp(cmd, "lsp") == 0) {
+        lsp_status_report();
+        return;
+    }
+    if (strcmp(cmd, "redo") == 0) {
+        buf_redo(b);
+        return;
+    }
 
     /* Tab shortcuts :t1..:t9 and Russian :е1..:е9 */
     if ((cmd[0] == 't' && cmd[1] >= '1' && cmd[1] <= '9' && cmd[2] == '\0') ||
@@ -288,7 +346,7 @@ void cmd_execute(const char *raw) {
             E.active_pane = 0;
             return;
         }
-        if (has_dirty_buffers()) {
+        if (has_dirty_buffers() && E.cfg.confirm_quit) {
             editor_set_status("Unsaved changes! Use :q! to force quit or :wq to save");
         } else {
             E.running = 0;
@@ -374,6 +432,28 @@ void cmd_execute(const char *raw) {
             E.cfg.line_numbers = 1;
         } else if (strcmp(opt, "nonumber") == 0 || strcmp(opt, "nonu") == 0) {
             E.cfg.line_numbers = 0;
+        } else if (strcmp(opt, "relativenumber") == 0 || strcmp(opt, "rnu") == 0) {
+            E.cfg.relative_numbers = 1;
+        } else if (strcmp(opt, "norelativenumber") == 0 || strcmp(opt, "nornu") == 0) {
+            E.cfg.relative_numbers = 0;
+        } else if (strcmp(opt, "ignorecase") == 0 || strcmp(opt, "ic") == 0) {
+            E.cfg.ignore_case = 1;
+        } else if (strcmp(opt, "noignorecase") == 0 || strcmp(opt, "noic") == 0) {
+            E.cfg.ignore_case = 0;
+        } else if (strcmp(opt, "smartcase") == 0 || strcmp(opt, "scs") == 0) {
+            E.cfg.smart_case = 1;
+        } else if (strcmp(opt, "nosmartcase") == 0 || strcmp(opt, "noscs") == 0) {
+            E.cfg.smart_case = 0;
+        } else if (strncmp(opt, "colorcolumn=", 12) == 0 || strncmp(opt, "cc=", 3) == 0) {
+            int n = atoi(opt[1] == 'o' ? opt + 12 : opt + 3);
+            if (n >= 0 && n <= 200) E.cfg.colorcolumn = n;
+        } else if (strncmp(opt, "scrolloff=", 10) == 0 || strncmp(opt, "so=", 3) == 0) {
+            int n = atoi(opt[1] == 'c' ? opt + 10 : opt + 3);
+            if (n >= 0 && n <= 20) E.cfg.scrolloff = n;
+        } else if (strcmp(opt, "lsp") == 0) {
+            E.cfg.lsp_enabled = 1;
+        } else if (strcmp(opt, "nolsp") == 0) {
+            E.cfg.lsp_enabled = 0;
         } else if (strcmp(opt, "cursorline") == 0) {
             E.cfg.cursorline = 1;
         } else if (strcmp(opt, "nocursorline") == 0) {

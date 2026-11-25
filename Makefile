@@ -9,7 +9,9 @@ CPPFLAGS += -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -DSYSCONFDIR='"$(SYSCO
 LDFLAGS ?=
 
 TARGET = cti
-SRCS = src/main.c src/terminal.c src/config.c src/buffer.c src/syntax.c src/tree.c src/ui.c src/commands.c src/plugins.c src/tools.c src/autocomplete.c
+SRCS = src/main.c src/terminal.c src/config.c src/buffer.c src/syntax.c \
+       src/tree.c src/ui.c src/commands.c src/plugins.c src/tools.c \
+       src/autocomplete.c src/json.c src/lsp.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean install uninstall

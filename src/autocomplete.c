@@ -115,18 +115,34 @@ void ac_refresh(Buffer *b, int force) {
     }
 
     int plen = end - start;
-    if (plen < (force ? 1 : 2) || plen > 48) {
+    int min_ch = E.cfg.autocomplete_min_chars > 0 ? E.cfg.autocomplete_min_chars : 2;
+    if (!force && plen < min_ch) {
+        ac_dismiss();
+        return;
+    }
+    if (force && plen == 0 && E.lsp_ac_count == 0) {
+        ac_dismiss();
+        return;
+    }
+    if (plen > 48) {
         ac_dismiss();
         return;
     }
 
     char prefix[64];
-    memcpy(prefix, ln->chars + start, (size_t)plen);
+    if (plen > 0) memcpy(prefix, ln->chars + start, (size_t)plen);
     prefix[plen] = '\0';
 
     E.ac_count = 0;
     E.ac_sel = 0;
     E.ac_prefix_len = plen;
+
+    /* Live LSP completion items take priority */
+    for (int i = 0; i < E.lsp_ac_count && E.ac_count < MAX_AC_ITEMS; i++) {
+        ac_add_item(E.lsp_ac_items[i],
+                    E.lsp_ac_kinds[i][0] ? E.lsp_ac_kinds[i] : "lsp",
+                    prefix, plen);
+    }
 
     int syn = b->syntax_id;
     if (syn == SYN_PYTHON) {

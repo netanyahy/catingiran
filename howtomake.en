@@ -1,6 +1,6 @@
-# catingiran (`cti`) Configuration & User Guide
+# catingiran (`cti`) v1.0.0 — Full User & Configuration Guide
 
-**catingiran** (`cti`) is a fast terminal IDE and code editor written in pure C featuring Vim-style modal editing and command line, top bufferline tabs, syntax highlighting (**C/C++**, **Python**, **Java**, JS/TS, Shell/Conf), a VS Code-style file explorer sidebar, a built-in **plugin manager**, split panes, code runner, project grep, fuzzy file finder, and Git integration.
+**catingiran** (`cti`) is a fast terminal IDE and code editor written in pure C11 under the **BSD-3-Clause** license with zero third-party build dependencies. It combines Vim modal grammar, an asynchronous JSON-RPC 2.0 LSP client, VS Code-style file explorer sidebar, buffer tabs, split panes, code runner, and a built-in plugin manager.
 
 ---
 
@@ -10,13 +10,13 @@
 git clone https://github.com/netanyahy/catingiran.git
 cd catingiran
 make
-sudo make install
+sudo make install   # or: doas make install
 ```
 
 After installation:
-* Both `cti` and `catingiran` commands are available in `/usr/local/bin`.
-* Your editable preset config is created at `~/.config/catingiran/catingiran.conf`.
-* Plugins live in `~/.config/catingiran/plugins/`.
+* `cti` and `catingiran` are installed to `/usr/local/bin`.
+* Default preset config is copied to `/usr/local/etc/catingiran.conf` and `~/.config/catingiran/catingiran.conf`.
+* Plugins reside in `~/.config/catingiran/plugins/`.
 
 To uninstall:
 ```sh
@@ -25,69 +25,110 @@ sudo make uninstall
 
 ---
 
-## 2. Configuration (`catingiran.conf`)
+## 2. Configuration (`~/.config/catingiran/catingiran.conf`)
 
-Open your config right inside the editor with **`:conf`**:
-```text
-~/.config/catingiran/catingiran.conf
-```
-Reload config & plugins live at any time with **`:reload`**.
+Open your config directly inside the editor with **`:conf`**, and apply edits without restarting using **`:reload`**.
 
-### `catingiran.conf` Options
+### Appearance & Themes
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `theme` | `charcoal` | Theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `theme` | `charcoal` | Color theme: `charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light` |
+| `show_tabs` | `true` | Show top bufferline tabs |
+| `statusline` | `true` | Show bottom mode/file/Git statusline |
+| `line_numbers` | `true` | Show gutter line numbers |
+| `relative_numbers` | `false` | Hybrid relative line numbers around cursor |
+| `cursorline` | `true` | Highlight active cursor line |
+| `colorcolumn` | `100` | Vertical ruler column (`0` disables) |
+| `nerd_icons` | `true` | Nerd Font file/folder icons (`false` for plain ASCII/Unicode) |
+
+### Indentation & Editing
+
+| Option | Default | Description |
+| --- | --- | --- |
 | `tab_size` | `4` | Tab width (`1`–`16`) |
 | `expand_tab` | `true` | Insert spaces instead of `\t` |
-| `line_numbers` | `true` | Show line numbers |
-| `cursorline` | `true` | Highlight current line |
 | `auto_indent` | `true` | Auto-indent new lines |
 | `auto_pairs` | `true` | Auto-close `()`, `[]`, `{}`, `""`, `''` |
-| `show_tabs` | `true` | Show top bufferline tabs |
-| `mouse` | `true` | Enable mouse clicks & wheel scrolling |
-| `sidebar_open` | `true` | Open file explorer sidebar on startup |
+| `highlight_current_word` | `true` | Highlight matching occurrences of word under cursor |
+| `trailing_whitespace` | `true` | Highlight trailing spaces/tabs on lines |
+| `trim_on_save` | `false` | Strip trailing whitespace on `:w` |
+
+### Scrolling, Input & Search
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `scrolloff` | `0` | Context lines to keep above/below cursor (`0`–`20`) |
+| `mouse` | `true` | Mouse clicks (tabs, sidebar, editor) & scroll wheel |
+| `russian_keymap` | `false` | Map Cyrillic keys in Normal/Command mode (`ж`->`:`, `р/о/л/д`->`h/j/k/l`) |
+| `ignore_case` | `true` | Case-insensitive `/` find and `:%s` replace |
+| `smart_case` | `true` | Case-sensitive if query contains uppercase letters |
+| `hl_search` | `true` | Highlight all search matches on screen |
+
+### History, Panels, LSP & Plugins
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `undo_levels` | `500` | Maximum undo/redo history depth (`u` / `Ctrl+R`) |
+| `confirm_quit` | `true` | Prevent `:q` when buffers have unsaved changes (use `:q!`) |
+| `sidebar_open` | `true` | Open file explorer on startup |
 | `sidebar_width` | `28` | Sidebar width (`16`–`60`) |
-| `show_hidden` | `true` | Show dotfiles in sidebar |
-| `nerd_icons` | `true` | Nerd Font file/folder icons (`false` for ASCII/Unicode) |
-| `output_height` | `8` | Bottom output drawer height in lines (`4`–`30`) |
+| `sidebar_side` | `left` | Sidebar position: `left` or `right` |
+| `show_hidden` | `false` | Show dotfiles in sidebar (`H` toggles live) |
+| `output_height` | `8` | Output drawer height (`4`–`30`) |
+| `auto_complete` | `true` | Show live completion popup while typing |
+| `autocomplete_min_chars` | `2` | Minimum prefix chars before auto-popup (`1`–`10`) |
+| `auto_lint` | `false` | Run linter automatically on save |
+| `lsp_enabled` | `true` | Enable async LSP client (`clangd`, `pyright-langserver`, `jdtls`) |
+| `lsp_auto_hover` | `false` | Reserved option for auto-hover behavior |
 | `git_branch` | `true` | Show Git branch in statusline |
-| `russian_keymap` | `true` | Cyrillic support in Normal/Command mode (`ж` -> `:`, `р/о/л/д` -> `h/j/k/l`) |
-| `plugin` | — | Add plugin: `plugin = user/repo` |
+| `plugin` | `python`, `c`, `java` | Enable official pack or `user/repo` GitHub plugin |
 
 ---
 
-## 3. Built-in Plugin Manager (`catingiran Plug`)
+## 3. Asynchronous LSP Support
 
-Add plugins to `~/.config/catingiran/catingiran.conf`:
-```ini
-plugin = user/repo
-```
-Or install directly inside `cti` via `:PlugAdd user/repo`.
+When opening C/C++, Python, or Java files, `cti` automatically launches matching LSP servers in `$PATH` over non-blocking JSON-RPC pipes:
+* **C / C++**: `clangd`
+* **Python**: `pyright-langserver --stdio` (fallback: `pylsp`)
+* **Java**: `jdtls`
 
-Plugin commands:
-* `:PlugStatus` — view configured & installed plugins and registered commands.
-* `:PlugInstall` — clone configured plugins into `~/.config/catingiran/plugins/`.
-* `:PlugUpdate` — update installed plugins via `git pull`.
-* `:PlugClean` — remove plugins no longer listed in `catingiran.conf`.
-* `:PlugAdd user/repo` — append plugin to `catingiran.conf` and install it immediately.
+LSP features:
+* Real-time diagnostics (`●` error / `▲` warning in gutter, full message in bottom bar when cursor is on line).
+* `gd` — Go to Definition (`textDocument/definition`).
+* `gr` — Find References (`textDocument/references`).
+* `K` — Floating Hover documentation card (`textDocument/hover`, `Esc` dismisses).
+* `Space + r n` — Rename symbol across workspace (`textDocument/rename`).
+* `:lsp` — Show active LSP servers, PIDs, and status.
+* Live LSP completion items integrated into the Insert mode popup (`Ctrl+Space` or automatic).
 
 ---
 
-## 4. Command Line (`:`) & Shortcuts (`<Space>` = Leader)
+## 4. Built-in Plugin Manager (`catingiran Plug`)
 
-* `:conf` / `:reload` — open `catingiran.conf` / reload config & plugins.
-* `:run` / `F5` / `Space + r` — compile & run current C/C++/Python/Java/Shell/Makefile file.
-* `:out` / `:ho` / `Ctrl + J` — show / hide / toggle bottom output drawer.
-* `:term` / `Space + t` — open interactive `$SHELL` and return back into `cti` on exit.
-* `:find` / `Ctrl + P` / `Space + ff` — fuzzy file finder across project.
-* `:grep <text>` / `Space + fg` — project-wide search (`Enter` or `gf` jumps to match).
-* `:git` / `:diff` / `Space + g` — Git status/log or unstaged diff.
-* `:stats` — project code statistics (files by language, lines, size, TODO/FIXME).
-* `:vsplit` / `:split` / `:only` / `Ctrl + W` — split panes & switch active pane.
-* `gcc` / `gc` (Visual) — toggle line comments (`//` or `#`).
-* `J` / `K` (Visual) — move selected lines down / up.
-* `m` / `M` — toggle bookmark (`★`) / jump to next bookmark.
-* `:ot` / `:ht` / `:tree` / `Ctrl + B` / `F2` — open / hide / toggle file explorer.
-* `:t1..:t9` / `Tab` / `Shift + Tab` — switch tabs.
-* `:theme <name>` / `:themes` — switch theme live.
+* `:PlugList` — browse official packs (`python`, `c`, `java`, `web`, `git-extras`).
+* `:PlugAdd <name|user/repo>` — append plugin to `catingiran.conf` and install immediately.
+* `:PlugCreate <name>` — scaffold a custom plugin in `~/.config/catingiran/plugins/`.
+* `:PlugStatus` / `:PlugInstall` / `:PlugUpdate` / `:PlugClean` — manage installed plugins.
+
+---
+
+## 5. Vim Counts, Text Objects, Macros & Search/Replace
+
+* **Counts**: `5dd`, `10j`, `3k`, `3w`, `4x`, `3p`, `5u`, `5Ctrl+R`, `15G`, `15gg`.
+* **Text Objects (`c`/`d`/`y` + `i`/`a` + obj)**: `ciw`, `diw`, `yiw`, `di"`, `da"`, `di'`, `da'`, `di(`, `da(`, `di{`, `da{`, `di[`, `da[`, plus Visual `vi(`, `vi{`, `vi"`, `viw`.
+* **Macros**: `qa` starts recording into register `a` (`[REC @a]`), `q` in Normal stops recording, `@a` / `3@a` / `@@` replays.
+* **Substitute**: `:%s/old/new/g` (whole file) and `:s/old/new/g` (current line).
+* **Undo / Redo**: `u` and `Ctrl+R` (or `:redo`).
+
+---
+
+## 6. Commands & Shortcuts (`<Space>` = Leader)
+
+* `:w [file]`, `:q`, `:q!`, `:wq`, `:x`, `:e file`, `:new`, `:bd`, `:bn`, `:bp`, `:t1`..`:t9`
+* `:ot`, `:ht`, `:tree` / `Ctrl + B` / `F2` / `Space + e` — file explorer (`H` hidden, `a` create, `r` rename, `d` delete).
+* `:vsplit`, `:split`, `:only` / `Ctrl + W` / `Space + v/s/x` — split panes.
+* `:run` / `F5` / `Space + rr` — build & run current file; `Ctrl + J` (`:out`/`:ho`) — output drawer.
+* `:find` / `Ctrl + P` / `Space + ff` — fuzzy file finder; `:grep text` / `Space + fg` — project grep (`Enter`/`gf` jump).
+* `:git`, `:diff`, `:stats`, `:term`, `:lint`, `:fmt`, `:ft <lang>`, `:theme <name>`, `:set <opt>`.
+* `gcc` / `gc` (Visual) — toggle line comments; `J` / `K` (Visual) — move lines; `m` / `M` — bookmarks; `]d` / `[d` — next/prev diagnostic.

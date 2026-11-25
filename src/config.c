@@ -6,13 +6,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
-static Color rgb(unsigned char r, unsigned char g, unsigned char b) {
-    Color c = { r, g, b };
-    return c;
-}
-
 static const Theme BUILTIN_THEMES[] = {
-    /* 1. Charcoal (OnVim-inspired dark graphite monochrome) */
+    /* 1. Charcoal (OnVim-inspired dark graphite + vivid syntax colors) */
     {
         .name = "charcoal",
         .bg = {22, 23, 27},
@@ -209,7 +204,6 @@ static const Theme BUILTIN_THEMES[] = {
 #define NUM_THEMES (sizeof(BUILTIN_THEMES) / sizeof(BUILTIN_THEMES[0]))
 
 int theme_apply(const char *name, Theme *out) {
-    (void)rgb;
     for (size_t i = 0; i < NUM_THEMES; i++) {
         if (strcmp(BUILTIN_THEMES[i].name, name) == 0) {
             *out = BUILTIN_THEMES[i];
@@ -225,22 +219,39 @@ const char *theme_list_names(void) {
 
 void config_init_defaults(Config *cfg) {
     snprintf(cfg->theme, sizeof(cfg->theme), "%s", "charcoal");
+    cfg->show_tabs = 1;
+    cfg->statusline = 1;
+    cfg->line_numbers = 1;
+    cfg->relative_numbers = 0;
+    cfg->cursorline = 1;
+    cfg->colorcolumn = 100;
+    cfg->nerd_icons = 1;
     cfg->tab_size = 4;
     cfg->expand_tab = 1;
-    cfg->line_numbers = 1;
-    cfg->cursorline = 1;
     cfg->auto_indent = 1;
     cfg->auto_pairs = 1;
-    cfg->auto_complete = 1;
-    cfg->auto_lint = 1;
+    cfg->highlight_current_word = 1;
+    cfg->trailing_whitespace = 1;
+    cfg->trim_on_save = 0;
+    cfg->scrolloff = 0;
     cfg->mouse_enabled = 1;
+    cfg->russian_keymap = 0;
+    cfg->ignore_case = 1;
+    cfg->smart_case = 1;
+    cfg->hl_search = 1;
+    cfg->undo_levels = 500;
+    cfg->persistent_undo = 0;
+    cfg->confirm_quit = 1;
     cfg->sidebar_open_on_start = 1;
     cfg->sidebar_width = 28;
-    cfg->show_hidden = 1;
-    cfg->nerd_icons = 1;
-    cfg->russian_keymap = 1;
-    cfg->show_tabs = 1;
+    cfg->sidebar_right = 0;
+    cfg->show_hidden = 0;
     cfg->output_height = 8;
+    cfg->auto_complete = 1;
+    cfg->autocomplete_min_chars = 2;
+    cfg->auto_lint = 0;
+    cfg->lsp_enabled = 1;
+    cfg->lsp_auto_hover = 0;
     cfg->git_branch = 1;
     cfg->num_plugins = 0;
 }
@@ -255,18 +266,13 @@ static char *trim_ws(char *s) {
 }
 
 static int parse_bool(const char *v) {
-    if (strcmp(v, "1") == 0 || strcmp(v, "true") == 0 ||
-        strcmp(v, "yes") == 0 || strcmp(v, "on") == 0) {
-        return 1;
-    }
-    return 0;
+    return strcmp(v, "1") == 0 || strcmp(v, "true") == 0 ||
+           strcmp(v, "yes") == 0 || strcmp(v, "on") == 0;
 }
 
 static void mkdir_p_one(const char *path) {
     struct stat st;
-    if (stat(path, &st) != 0) {
-        mkdir(path, 0755);
-    }
+    if (stat(path, &st) != 0) mkdir(path, 0755);
 }
 
 void config_get_user_path(char *buf, size_t sz) {
@@ -290,6 +296,10 @@ static int is_builtin_pack_name(const char *val) {
 
 static void add_plugin_spec(Config *cfg, const char *val) {
     if (!val || !val[0] || cfg->num_plugins >= MAX_PLUGINS) return;
+    for (int i = 0; i < cfg->num_plugins; i++) {
+        if (strcmp(cfg->plugins[i].spec, val) == 0) return;
+    }
+
     PluginSpec *ps = &cfg->plugins[cfg->num_plugins];
     snprintf(ps->spec, sizeof(ps->spec), "%s", val);
 
@@ -355,29 +365,17 @@ static void copy_preset_if_missing(const char *user_path) {
         if (src) {
             char buf[4096];
             size_t n;
-            while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
-                fwrite(buf, 1, n, dst);
-            }
+            while ((n = fread(buf, 1, sizeof(buf), src)) > 0) fwrite(buf, 1, n, dst);
         } else {
             fprintf(dst,
                     "# catingiran (cti) configuration\n"
-                    "theme = charcoal\n"
-                    "tab_size = 4\n"
-                    "expand_tab = true\n"
-                    "line_numbers = true\n"
-                    "cursorline = true\n"
-                    "auto_indent = true\n"
-                    "auto_pairs = true\n"
-                    "show_tabs = true\n"
-                    "mouse = true\n"
-                    "sidebar_open = true\n"
-                    "sidebar_width = 28\n"
-                    "show_hidden = true\n"
-                    "nerd_icons = true\n"
-                    "output_height = 8\n"
-                    "git_branch = true\n"
-                    "russian_keymap = true\n"
-                    "# plugin = user/repo\n");
+                    "theme = charcoal\nline_numbers = true\ncursorline = true\n"
+                    "colorcolumn = 100\ntab_size = 4\nexpand_tab = true\n"
+                    "auto_pairs = true\nhighlight_current_word = true\n"
+                    "trailing_whitespace = true\nignore_case = true\nsmart_case = true\n"
+                    "hl_search = true\nmouse = true\nsidebar_open = true\n"
+                    "nerd_icons = true\nauto_complete = true\nlsp_enabled = true\n"
+                    "confirm_quit = true\nplugin = python\nplugin = c\nplugin = java\n");
         }
         fclose(dst);
     }
@@ -400,7 +398,6 @@ static void parse_conf_file(const char *path, Config *cfg) {
         char *key = trim_ws(p);
         char *val = trim_ws(eq + 1);
 
-        /* Strip optional inline comment and quotes */
         if (*val == '"' || *val == '\'') {
             char q = *val++;
             char *endq = strchr(val, q);
@@ -411,48 +408,57 @@ static void parse_conf_file(const char *path, Config *cfg) {
             val = trim_ws(val);
         }
 
-        if (strcmp(key, "theme") == 0) {
-            snprintf(cfg->theme, sizeof(cfg->theme), "%s", val);
-        } else if (strcmp(key, "tab_size") == 0) {
+        if (strcmp(key, "theme") == 0) snprintf(cfg->theme, sizeof(cfg->theme), "%s", val);
+        else if (strcmp(key, "show_tabs") == 0) cfg->show_tabs = parse_bool(val);
+        else if (strcmp(key, "statusline") == 0) cfg->statusline = parse_bool(val);
+        else if (strcmp(key, "line_numbers") == 0) cfg->line_numbers = parse_bool(val);
+        else if (strcmp(key, "relative_numbers") == 0) cfg->relative_numbers = parse_bool(val);
+        else if (strcmp(key, "cursorline") == 0) cfg->cursorline = parse_bool(val);
+        else if (strcmp(key, "colorcolumn") == 0) {
+            int n = atoi(val);
+            cfg->colorcolumn = (n >= 0 && n <= 300) ? n : 0;
+        } else if (strcmp(key, "nerd_icons") == 0) cfg->nerd_icons = parse_bool(val);
+        else if (strcmp(key, "tab_size") == 0) {
             int n = atoi(val);
             if (n >= 1 && n <= 16) cfg->tab_size = n;
-        } else if (strcmp(key, "expand_tab") == 0) {
-            cfg->expand_tab = parse_bool(val);
-        } else if (strcmp(key, "line_numbers") == 0) {
-            cfg->line_numbers = parse_bool(val);
-        } else if (strcmp(key, "cursorline") == 0) {
-            cfg->cursorline = parse_bool(val);
-        } else if (strcmp(key, "auto_indent") == 0) {
-            cfg->auto_indent = parse_bool(val);
-        } else if (strcmp(key, "auto_pairs") == 0) {
-            cfg->auto_pairs = parse_bool(val);
-        } else if (strcmp(key, "auto_complete") == 0) {
-            cfg->auto_complete = parse_bool(val);
-        } else if (strcmp(key, "auto_lint") == 0) {
-            cfg->auto_lint = parse_bool(val);
-        } else if (strcmp(key, "mouse") == 0) {
-            cfg->mouse_enabled = parse_bool(val);
-        } else if (strcmp(key, "sidebar_open") == 0) {
-            cfg->sidebar_open_on_start = parse_bool(val);
-        } else if (strcmp(key, "sidebar_width") == 0) {
+        } else if (strcmp(key, "expand_tab") == 0) cfg->expand_tab = parse_bool(val);
+        else if (strcmp(key, "auto_indent") == 0) cfg->auto_indent = parse_bool(val);
+        else if (strcmp(key, "auto_pairs") == 0) cfg->auto_pairs = parse_bool(val);
+        else if (strcmp(key, "highlight_current_word") == 0) cfg->highlight_current_word = parse_bool(val);
+        else if (strcmp(key, "trailing_whitespace") == 0) cfg->trailing_whitespace = parse_bool(val);
+        else if (strcmp(key, "trim_on_save") == 0) cfg->trim_on_save = parse_bool(val);
+        else if (strcmp(key, "scrolloff") == 0) {
+            int n = atoi(val);
+            cfg->scrolloff = (n >= 0 && n <= 20) ? n : 0;
+        } else if (strcmp(key, "mouse") == 0) cfg->mouse_enabled = parse_bool(val);
+        else if (strcmp(key, "russian_keymap") == 0) cfg->russian_keymap = parse_bool(val);
+        else if (strcmp(key, "ignore_case") == 0) cfg->ignore_case = parse_bool(val);
+        else if (strcmp(key, "smart_case") == 0) cfg->smart_case = parse_bool(val);
+        else if (strcmp(key, "hl_search") == 0) cfg->hl_search = parse_bool(val);
+        else if (strcmp(key, "undo_levels") == 0) {
+            int n = atoi(val);
+            if (n >= 10 && n <= 10000) cfg->undo_levels = n;
+        } else if (strcmp(key, "persistent_undo") == 0) cfg->persistent_undo = parse_bool(val);
+        else if (strcmp(key, "confirm_quit") == 0) cfg->confirm_quit = parse_bool(val);
+        else if (strcmp(key, "sidebar_open") == 0) cfg->sidebar_open_on_start = parse_bool(val);
+        else if (strcmp(key, "sidebar_width") == 0) {
             int n = atoi(val);
             if (n >= 16 && n <= 60) cfg->sidebar_width = n;
-        } else if (strcmp(key, "show_hidden") == 0) {
-            cfg->show_hidden = parse_bool(val);
-        } else if (strcmp(key, "nerd_icons") == 0) {
-            cfg->nerd_icons = parse_bool(val);
-        } else if (strcmp(key, "russian_keymap") == 0) {
-            cfg->russian_keymap = parse_bool(val);
-        } else if (strcmp(key, "show_tabs") == 0) {
-            cfg->show_tabs = parse_bool(val);
-        } else if (strcmp(key, "output_height") == 0) {
+        } else if (strcmp(key, "sidebar_side") == 0) {
+            cfg->sidebar_right = (strcmp(val, "right") == 0);
+        } else if (strcmp(key, "show_hidden") == 0) cfg->show_hidden = parse_bool(val);
+        else if (strcmp(key, "output_height") == 0) {
             int n = atoi(val);
             if (n >= 4 && n <= 30) cfg->output_height = n;
-        } else if (strcmp(key, "git_branch") == 0) {
-            cfg->git_branch = parse_bool(val);
-        } else if (strcmp(key, "plugin") == 0) {
-            add_plugin_spec(cfg, val);
-        }
+        } else if (strcmp(key, "auto_complete") == 0) cfg->auto_complete = parse_bool(val);
+        else if (strcmp(key, "autocomplete_min_chars") == 0) {
+            int n = atoi(val);
+            if (n >= 1 && n <= 6) cfg->autocomplete_min_chars = n;
+        } else if (strcmp(key, "auto_lint") == 0) cfg->auto_lint = parse_bool(val);
+        else if (strcmp(key, "lsp_enabled") == 0) cfg->lsp_enabled = parse_bool(val);
+        else if (strcmp(key, "lsp_auto_hover") == 0) cfg->lsp_auto_hover = parse_bool(val);
+        else if (strcmp(key, "git_branch") == 0) cfg->git_branch = parse_bool(val);
+        else if (strcmp(key, "plugin") == 0) add_plugin_spec(cfg, val);
     }
     fclose(f);
 }
@@ -464,7 +470,6 @@ void config_load(Config *cfg) {
     config_get_user_path(user_conf, sizeof(user_conf));
     copy_preset_if_missing(user_conf);
 
-    /* Load system preset first, then user config overrides */
     parse_conf_file(SYSCONFDIR "/catingiran.conf", cfg);
     parse_conf_file(user_conf, cfg);
 

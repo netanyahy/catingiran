@@ -75,27 +75,72 @@ static void buf_ensure_lines(Buffer *b, int needed) {
     b->cap_lines = ncap;
 }
 
-static void undo_push(Buffer *b, UndoKind kind, int row, int col, const char *text, int len) {
-    if (!b->undo_recording) return;
+static int buf_find_idx(Buffer *b) {
+    for (int i = 0; i < E.num_buffers; i++) {
+        if (&E.buffers[i] == b) return i;
+    }
+    return -1;
+}
+
+static void redo_clear(Buffer *b) {
+    for (int i = 0; i < b->redo_len; i++) {
+        free(b->redo[i].text);
+    }
+    b->redo_len = 0;
+}
+
+static void redo_push_act(Buffer *b, UndoAction u) {
+    if (b->redo_len >= b->redo_cap) {
+        int ncap = b->redo_cap ? b->redo_cap * 2 : 128;
+        UndoAction *na = realloc(b->redo, (size_t)ncap * sizeof(UndoAction));
+        if (!na) {
+            free(u.text);
+            return;
+        }
+        b->redo = na;
+        b->redo_cap = ncap;
+    }
+    b->redo[b->redo_len++] = u;
+}
+
+static void undo_push_act(Buffer *b, UndoAction u) {
+    int max_lvl = E.cfg.undo_levels > 0 ? E.cfg.undo_levels : 500;
+    while (b->undo_len >= max_lvl) {
+        free(b->undo[0].text);
+        memmove(&b->undo[0], &b->undo[1], (size_t)(b->undo_len - 1) * sizeof(UndoAction));
+        b->undo_len--;
+    }
     if (b->undo_len >= b->undo_cap) {
         int ncap = b->undo_cap ? b->undo_cap * 2 : 128;
         UndoAction *na = realloc(b->undo, (size_t)ncap * sizeof(UndoAction));
-        if (!na) return;
+        if (!na) {
+            free(u.text);
+            return;
+        }
         b->undo = na;
         b->undo_cap = ncap;
     }
-    UndoAction *u = &b->undo[b->undo_len++];
-    u->kind = kind;
-    u->row = row;
-    u->col = col;
-    u->len = len;
+    b->undo[b->undo_len++] = u;
+}
+
+static void undo_push(Buffer *b, UndoKind kind, int row, int col, const char *text, int len) {
+    if (!b->undo_recording) return;
+    redo_clear(b);
+    UndoAction u;
+    u.kind = kind;
+    u.row = row;
+    u.col = col;
+    u.len = len;
     if (text && len > 0) {
-        u->text = malloc((size_t)len + 1);
-        memcpy(u->text, text, (size_t)len);
-        u->text[len] = '\0';
+        u.text = malloc((size_t)len + 1);
+        if (u.text) {
+            memcpy(u.text, text, (size_t)len);
+            u.text[len] = '\0';
+        }
     } else {
-        u->text = NULL;
+        u.text = NULL;
     }
+    undo_push_act(b, u);
 }
 
 static void buf_raw_insert_line(Buffer *b, int at, const char *s, int len) {
@@ -148,11 +193,13 @@ static void line_raw_delete(Buffer *b, int row, int col, int len) {
 void buf_raw_insert_at(Buffer *b, int row, int col, const char *s, int len) {
     line_raw_insert(b, row, col, s, len);
     b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_raw_delete_at(Buffer *b, int row, int col, int len) {
     line_raw_delete(b, row, col, len);
     b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_init_empty(Buffer *b) {
@@ -171,6 +218,10 @@ void buf_free(Buffer *b) {
         free(b->undo[i].text);
     }
     free(b->undo);
+    for (int i = 0; i < b->redo_len; i++) {
+        free(b->redo[i].text);
+    }
+    free(b->redo);
     memset(b, 0, sizeof(Buffer));
 }
 
@@ -229,6 +280,7 @@ int buf_open(const char *filename) {
     syntax_update_all(b);
     b->dirty = 0;
     E.cur_buf = slot;
+    if (b->filename) lsp_on_buf_open(slot);
     return slot;
 }
 
@@ -277,6 +329,7 @@ int buf_open_scratch(const char *title, const char *content, int syntax_id) {
 }
 
 int buf_save(Buffer *b, const char *new_name) {
+    int had_name = (b->filename != NULL);
     if (new_name && new_name[0]) {
         free(b->filename);
         b->filename = strdup(new_name);
@@ -286,6 +339,24 @@ int buf_save(Buffer *b, const char *new_name) {
     if (!b->filename) {
         editor_set_status("No file name (use :w filename)");
         return 0;
+    }
+
+    if (E.cfg.trim_on_save) {
+        for (int i = 0; i < b->num_lines; i++) {
+            Line *ln = &b->lines[i];
+            int trim = 0;
+            while (ln->size - trim > 0 &&
+                   (ln->chars[ln->size - trim - 1] == ' ' ||
+                    ln->chars[ln->size - trim - 1] == '\t')) {
+                trim++;
+            }
+            if (trim > 0) {
+                int col = ln->size - trim;
+                undo_push(b, UNDO_DEL_STR, i, col, ln->chars + col, trim);
+                line_raw_delete(b, i, col, trim);
+                if (b->cy == i && b->cx > ln->size) b->cx = ln->size;
+            }
+        }
     }
 
     FILE *fp = fopen(b->filename, "wb");
@@ -311,6 +382,12 @@ int buf_save(Buffer *b, const char *new_name) {
     b->dirty = 0;
     editor_set_status("\"%s\" %dL, %zuB written", b->filename, b->num_lines, total_bytes);
     tree_refresh();
+    int idx = buf_find_idx(b);
+    if (!had_name || !b->lsp_opened) {
+        lsp_on_buf_open(idx);
+    } else {
+        lsp_on_buf_save(idx);
+    }
     if (E.cfg.auto_lint) tools_lint_buffer(b);
     return 1;
 }
@@ -348,6 +425,7 @@ void buf_insert_bytes(Buffer *b, const char *s, int len) {
             syntax_update_all(b);
         }
     }
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_insert_newline(Buffer *b) {
@@ -387,6 +465,7 @@ void buf_insert_newline(Buffer *b) {
     b->cy++;
     b->cx = ind_len;
     b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_backspace(Buffer *b) {
@@ -412,6 +491,7 @@ void buf_backspace(Buffer *b) {
         b->cx = prev_len;
         b->dirty++;
     }
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_delete_at_cursor(Buffer *b) {
@@ -431,6 +511,7 @@ void buf_delete_at_cursor(Buffer *b) {
         buf_raw_del_line(b, b->cy + 1);
         b->dirty++;
     }
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_delete_line(Buffer *b, int row) {
@@ -450,6 +531,7 @@ void buf_delete_line(Buffer *b, int row) {
             line_raw_delete(b, 0, 0, ln->size);
             b->cx = 0;
             b->dirty++;
+            lsp_on_buf_change(buf_find_idx(b));
         }
         return;
     }
@@ -459,6 +541,85 @@ void buf_delete_line(Buffer *b, int row) {
     if (b->cy >= b->num_lines) b->cy = b->num_lines - 1;
     if (b->cx > b->lines[b->cy].size) b->cx = b->lines[b->cy].size;
     b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
+}
+
+void buf_delete_range(Buffer *b, int sr, int sc, int er, int ec, int copy_to_clip) {
+    if (b->num_lines <= 0) return;
+    if (sr > er || (sr == er && sc > ec)) {
+        int tr = sr, tc = sc;
+        sr = er; sc = ec;
+        er = tr; ec = tc;
+    }
+    if (sr < 0) sr = 0;
+    if (er >= b->num_lines) er = b->num_lines - 1;
+    if (sc < 0) sc = 0;
+    if (sc > b->lines[sr].size) sc = b->lines[sr].size;
+    if (ec < 0) ec = 0;
+    if (ec > b->lines[er].size) ec = b->lines[er].size;
+
+    if (copy_to_clip) {
+        Abuf clip = {0};
+        if (sr == er) {
+            if (ec > sc) ab_append(&clip, b->lines[sr].chars + sc, ec - sc);
+        } else {
+            ab_append(&clip, b->lines[sr].chars + sc, b->lines[sr].size - sc);
+            ab_append_str(&clip, "\n");
+            for (int r = sr + 1; r < er; r++) {
+                ab_append(&clip, b->lines[r].chars, b->lines[r].size);
+                ab_append_str(&clip, "\n");
+            }
+            ab_append(&clip, b->lines[er].chars, ec);
+        }
+        ab_append(&clip, "\0", 1);
+        free(E.clipboard);
+        E.clipboard = clip.b;
+    }
+
+    if (sr == er) {
+        int len = ec - sc;
+        if (len > 0) {
+            undo_push(b, UNDO_DEL_STR, sr, sc, b->lines[sr].chars + sc, len);
+            line_raw_delete(b, sr, sc, len);
+            b->dirty++;
+            lsp_on_buf_change(buf_find_idx(b));
+        }
+        b->cy = sr;
+        b->cx = sc;
+        return;
+    }
+
+    int tail_len = b->lines[er].size - ec;
+    char *tail = NULL;
+    if (tail_len > 0) {
+        tail = malloc((size_t)tail_len + 1);
+        if (tail) {
+            memcpy(tail, b->lines[er].chars + ec, (size_t)tail_len);
+            tail[tail_len] = '\0';
+        }
+    }
+
+    for (int r = er; r >= sr + 1; r--) {
+        undo_push(b, UNDO_DEL_LINE, r, 0, b->lines[r].chars, b->lines[r].size);
+        buf_raw_del_line(b, r);
+    }
+
+    int head_del = b->lines[sr].size - sc;
+    if (head_del > 0) {
+        undo_push(b, UNDO_DEL_STR, sr, sc, b->lines[sr].chars + sc, head_del);
+        line_raw_delete(b, sr, sc, head_del);
+    }
+
+    if (tail && tail_len > 0) {
+        undo_push(b, UNDO_INS_STR, sr, sc, tail, tail_len);
+        line_raw_insert(b, sr, sc, tail, tail_len);
+    }
+    free(tail);
+
+    b->cy = sr;
+    b->cx = sc;
+    b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
 }
 
 void buf_indent_line(Buffer *b, int row, int delta) {
@@ -474,6 +635,7 @@ void buf_indent_line(Buffer *b, int row, int delta) {
         line_raw_insert(b, row, 0, spaces, ts);
         if (b->cy == row) b->cx += ts;
         b->dirty++;
+        lsp_on_buf_change(buf_find_idx(b));
     } else if (delta < 0) {
         int remove = 0;
         if (ln->size > 0 && ln->chars[0] == '\t') {
@@ -490,6 +652,7 @@ void buf_indent_line(Buffer *b, int row, int delta) {
                 b->cx = (b->cx > remove) ? (b->cx - remove) : 0;
             }
             b->dirty++;
+            lsp_on_buf_change(buf_find_idx(b));
         }
     }
 }
@@ -546,6 +709,15 @@ void buf_undo(Buffer *b) {
             b->cx = 0;
             break;
         case UNDO_INS_LINE:
+            if (u.row >= 0 && u.row < b->num_lines && !u.text) {
+                Line *ln = &b->lines[u.row];
+                u.len = ln->size;
+                u.text = malloc((size_t)ln->size + 1);
+                if (u.text) {
+                    if (ln->size > 0) memcpy(u.text, ln->chars, (size_t)ln->size);
+                    u.text[ln->size] = '\0';
+                }
+            }
             buf_raw_del_line(b, u.row);
             if (b->num_lines == 0) buf_raw_insert_line(b, 0, "", 0);
             b->cy = u.row < b->num_lines ? u.row : b->num_lines - 1;
@@ -553,16 +725,139 @@ void buf_undo(Buffer *b) {
             break;
     }
 
-    free(u.text);
+    redo_push_act(b, u);
     b->undo_recording = 1;
     if (b->dirty > 0) b->dirty--;
+    lsp_on_buf_change(buf_find_idx(b));
     editor_set_status("Undo");
+}
+
+void buf_redo(Buffer *b) {
+    if (b->redo_len <= 0) {
+        editor_set_status("Already at newest change");
+        return;
+    }
+
+    UndoAction u = b->redo[--b->redo_len];
+    b->undo_recording = 0;
+
+    switch (u.kind) {
+        case UNDO_INS_STR:
+            line_raw_insert(b, u.row, u.col, u.text ? u.text : "", u.len);
+            b->cy = u.row;
+            b->cx = u.col + u.len;
+            break;
+        case UNDO_DEL_STR:
+            line_raw_delete(b, u.row, u.col, u.len);
+            b->cy = u.row;
+            b->cx = u.col;
+            break;
+        case UNDO_SPLIT_LINE: {
+            Line *ln = &b->lines[u.row];
+            int tail = ln->size - u.col;
+            if (tail < 0) tail = 0;
+            int ind_len = u.len;
+            char *nl = malloc((size_t)ind_len + (size_t)tail + 1);
+            if (nl) {
+                if (ind_len > 0 && u.text) memcpy(nl, u.text, (size_t)ind_len);
+                if (tail > 0) memcpy(nl + ind_len, ln->chars + u.col, (size_t)tail);
+                nl[ind_len + tail] = '\0';
+                ln->size = u.col;
+                ln->chars[u.col] = '\0';
+                syntax_update_line(b, u.row);
+                buf_raw_insert_line(b, u.row + 1, nl, ind_len + tail);
+                free(nl);
+            }
+            b->cy = u.row + 1;
+            b->cx = ind_len;
+            break;
+        }
+        case UNDO_JOIN_LINE:
+            if (u.row + 1 < b->num_lines) {
+                Line *next_ln = &b->lines[u.row + 1];
+                if (next_ln->size > 0) {
+                    line_raw_insert(b, u.row, u.col, next_ln->chars, next_ln->size);
+                }
+                buf_raw_del_line(b, u.row + 1);
+                b->cy = u.row;
+                b->cx = u.col;
+            }
+            break;
+        case UNDO_DEL_LINE:
+            buf_raw_del_line(b, u.row);
+            if (b->num_lines == 0) buf_raw_insert_line(b, 0, "", 0);
+            b->cy = u.row < b->num_lines ? u.row : b->num_lines - 1;
+            b->cx = 0;
+            break;
+        case UNDO_INS_LINE:
+            buf_raw_insert_line(b, u.row, u.text ? u.text : "", u.len);
+            b->cy = u.row;
+            b->cx = 0;
+            break;
+    }
+
+    undo_push_act(b, u);
+    b->undo_recording = 1;
+    b->dirty++;
+    lsp_on_buf_change(buf_find_idx(b));
+    editor_set_status("Redo");
+}
+
+static int use_case_insensitive(const char *q) {
+    if (!E.cfg.ignore_case) return 0;
+    if (E.cfg.smart_case && q) {
+        for (int i = 0; q[i]; i++) {
+            if (isupper((unsigned char)q[i])) return 0;
+        }
+    }
+    return 1;
+}
+
+static int match_at(const char *hay, const char *needle, int nlen, int ci) {
+    if (!ci) return strncmp(hay, needle, (size_t)nlen) == 0;
+    for (int i = 0; i < nlen; i++) {
+        if (tolower((unsigned char)hay[i]) != tolower((unsigned char)needle[i])) return 0;
+    }
+    return 1;
+}
+
+int buf_replace_all(Buffer *b, const char *old_s, const char *new_s, int cur_line_only) {
+    if (!old_s || !old_s[0] || b->num_lines <= 0) return 0;
+    int olen = (int)strlen(old_s);
+    int nlen = new_s ? (int)strlen(new_s) : 0;
+    int ci = use_case_insensitive(old_s);
+    int sr = cur_line_only ? b->cy : 0;
+    int er = cur_line_only ? b->cy : (b->num_lines - 1);
+    int count = 0;
+
+    for (int r = sr; r <= er; r++) {
+        int c = 0;
+        while (c <= b->lines[r].size - olen) {
+            if (match_at(b->lines[r].chars + c, old_s, olen, ci)) {
+                undo_push(b, UNDO_DEL_STR, r, c, b->lines[r].chars + c, olen);
+                line_raw_delete(b, r, c, olen);
+                if (nlen > 0) {
+                    undo_push(b, UNDO_INS_STR, r, c, new_s, nlen);
+                    line_raw_insert(b, r, c, new_s, nlen);
+                }
+                c += nlen;
+                count++;
+                b->dirty++;
+            } else {
+                c++;
+            }
+        }
+    }
+    if (b->cx > b->lines[b->cy].size) b->cx = b->lines[b->cy].size;
+    if (count > 0) lsp_on_buf_change(buf_find_idx(b));
+    return count;
 }
 
 void buf_find(Buffer *b, const char *query, int dir) {
     if (!query || !query[0] || b->num_lines == 0) return;
 
     int qlen = (int)strlen(query);
+    int ci = use_case_insensitive(query);
     int start_row = b->cy;
     int start_col = b->cx + (dir > 0 ? 1 : -1);
 
@@ -574,7 +869,7 @@ void buf_find(Buffer *b, const char *query, int dir) {
         if (dir > 0) {
             int c0 = (step == 0 && start_col > 0) ? start_col : 0;
             for (int c = c0; c <= ln->size - qlen; c++) {
-                if (strncmp(ln->chars + c, query, (size_t)qlen) == 0) {
+                if (match_at(ln->chars + c, query, qlen, ci)) {
                     b->cy = r;
                     b->cx = c;
                     E.search_match_row = r;
@@ -586,7 +881,7 @@ void buf_find(Buffer *b, const char *query, int dir) {
             int c0 = (step == 0 && start_col >= 0 && start_col <= ln->size - qlen)
                      ? start_col : (ln->size - qlen);
             for (int c = c0; c >= 0; c--) {
-                if (strncmp(ln->chars + c, query, (size_t)qlen) == 0) {
+                if (match_at(ln->chars + c, query, qlen, ci)) {
                     b->cy = r;
                     b->cx = c;
                     E.search_match_row = r;

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -258,4 +259,42 @@ void ab_free(Abuf *ab) {
     ab->b = NULL;
     ab->len = 0;
     ab->cap = 0;
+}
+
+int term_wait_input(int timeout_ms) {
+    if (pushback_len > 0) return 1;
+    if (winch_flag) {
+        winch_flag = 0;
+        term_update_size();
+        return 2;
+    }
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    int maxfd = STDIN_FILENO;
+
+    for (int i = 0; i < MAX_LSP_SERVERS; i++) {
+        if (E.lsp[i].active && E.lsp[i].fd_out >= 0) {
+            FD_SET(E.lsp[i].fd_out, &rfds);
+            if (E.lsp[i].fd_out > maxfd) maxfd = E.lsp[i].fd_out;
+        }
+    }
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int r = select(maxfd + 1, &rfds, NULL, NULL, timeout_ms >= 0 ? &tv : NULL);
+    if (r < 0) {
+        if (winch_flag) {
+            winch_flag = 0;
+            term_update_size();
+            return 2;
+        }
+        return 0;
+    }
+    if (r == 0) return 0;
+    if (FD_ISSET(STDIN_FILENO, &rfds)) return 1;
+    return 2;
 }

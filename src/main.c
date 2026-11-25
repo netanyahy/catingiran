@@ -109,6 +109,181 @@ static void move_word_backward(Buffer *b) {
     clamp_cursor(b);
 }
 
+static int take_count(void) {
+    int n = E.count_prefix > 0 ? E.count_prefix : 1;
+    E.count_prefix = 0;
+    if (n > 10000) n = 10000;
+    return n;
+}
+
+static int is_word_byte(unsigned char c) {
+    return isalnum(c) || c == '_';
+}
+
+static void yank_range_to_clip(Buffer *b, int sr, int sc, int er, int ec) {
+    if (b->num_lines <= 0) return;
+    if (sr > er || (sr == er && sc > ec)) {
+        int tr = sr, tc = sc; sr = er; sc = ec; er = tr; ec = tc;
+    }
+    if (sr < 0) sr = 0;
+    if (er >= b->num_lines) er = b->num_lines - 1;
+    if (sc < 0) sc = 0;
+    if (sc > b->lines[sr].size) sc = b->lines[sr].size;
+    if (ec < 0) ec = 0;
+    if (ec > b->lines[er].size) ec = b->lines[er].size;
+
+    Abuf ab = {NULL, 0, 0};
+    if (sr == er) {
+        if (ec > sc) ab_append(&ab, b->lines[sr].chars + sc, ec - sc);
+    } else {
+        ab_append(&ab, b->lines[sr].chars + sc, b->lines[sr].size - sc);
+        ab_append_str(&ab, "\n");
+        for (int r = sr + 1; r < er; r++) {
+            ab_append(&ab, b->lines[r].chars, b->lines[r].size);
+            ab_append_str(&ab, "\n");
+        }
+        ab_append(&ab, b->lines[er].chars, ec);
+    }
+    ab_append(&ab, "\0", 1);
+    free(E.clipboard);
+    E.clipboard = ab.b;
+}
+
+static void yank_lines_to_clip(Buffer *b, int start_row, int cnt) {
+    if (start_row < 0 || start_row >= b->num_lines) return;
+    int end_row = start_row + cnt - 1;
+    if (end_row >= b->num_lines) end_row = b->num_lines - 1;
+    Abuf ab = {NULL, 0, 0};
+    for (int r = start_row; r <= end_row; r++) {
+        if (b->lines[r].size > 0) ab_append(&ab, b->lines[r].chars, b->lines[r].size);
+        ab_append_str(&ab, "\n");
+    }
+    ab_append(&ab, "\0", 1);
+    free(E.clipboard);
+    E.clipboard = ab.b;
+    editor_set_status("%d line(s) yanked", end_row - start_row + 1);
+}
+
+static int find_text_object(Buffer *b, char mod, int obj,
+                            int *sr, int *sc, int *er, int *ec) {
+    if (!b || b->cy < 0 || b->cy >= b->num_lines) return 0;
+    Line *ln = &b->lines[b->cy];
+
+    if (obj == 'w') {
+        if (ln->size == 0) return 0;
+        int pos = b->cx < ln->size ? b->cx : ln->size - 1;
+        int s = pos, e = pos + 1;
+        if (is_word_byte((unsigned char)ln->chars[pos])) {
+            while (s > 0 && is_word_byte((unsigned char)ln->chars[s - 1])) s--;
+            while (e < ln->size && is_word_byte((unsigned char)ln->chars[e])) e++;
+        } else if (isspace((unsigned char)ln->chars[pos])) {
+            while (s > 0 && isspace((unsigned char)ln->chars[s - 1])) s--;
+            while (e < ln->size && isspace((unsigned char)ln->chars[e])) e++;
+        }
+        if (mod == 'a') {
+            int oe = e;
+            while (e < ln->size && (ln->chars[e] == ' ' || ln->chars[e] == '\t')) e++;
+            if (e == oe) {
+                while (s > 0 && (ln->chars[s - 1] == ' ' || ln->chars[s - 1] == '\t')) s--;
+            }
+        }
+        *sr = *er = b->cy;
+        *sc = s;
+        *ec = e;
+        return 1;
+    }
+
+    if (obj == '"' || obj == '\'' || obj == '`') {
+        int q = obj;
+        int best_o = -1, best_c = -1;
+        int cur_o = -1;
+        for (int i = 0; i < ln->size; i++) {
+            if (ln->chars[i] == '\\') { i++; continue; }
+            if (ln->chars[i] == q) {
+                if (cur_o == -1) {
+                    cur_o = i;
+                } else {
+                    if ((cur_o <= b->cx && b->cx <= i) || (best_o == -1 && cur_o >= b->cx)) {
+                        best_o = cur_o;
+                        best_c = i;
+                        break;
+                    }
+                    cur_o = -1;
+                }
+            }
+        }
+        if (best_o >= 0 && best_c > best_o) {
+            *sr = *er = b->cy;
+            *sc = (mod == 'i') ? (best_o + 1) : best_o;
+            *ec = (mod == 'i') ? best_c : (best_c + 1);
+            return 1;
+        }
+        return 0;
+    }
+
+    char open_ch = 0, close_ch = 0;
+    if (obj == '(' || obj == ')' || obj == 'b') { open_ch = '('; close_ch = ')'; }
+    else if (obj == '{' || obj == '}' || obj == 'B') { open_ch = '{'; close_ch = '}'; }
+    else if (obj == '[' || obj == ']') { open_ch = '['; close_ch = ']'; }
+    else if (obj == '<' || obj == '>') { open_ch = '<'; close_ch = '>'; }
+    if (!open_ch) return 0;
+
+    int min_r = b->cy - 200; if (min_r < 0) min_r = 0;
+    int max_r = b->cy + 200; if (max_r >= b->num_lines) max_r = b->num_lines - 1;
+
+    int orow = -1, ocol = -1;
+    if (b->cx < ln->size && ln->chars[b->cx] == open_ch) {
+        orow = b->cy;
+        ocol = b->cx;
+    } else {
+        int depth = 0;
+        for (int r = b->cy; r >= min_r && orow == -1; r--) {
+            Line *rl = &b->lines[r];
+            int c0 = (r == b->cy) ? (b->cx < rl->size ? b->cx : rl->size - 1) : (rl->size - 1);
+            for (int c = c0; c >= 0; c--) {
+                if (r == b->cy && c == b->cx && rl->chars[c] == close_ch) {
+                    depth++;
+                    continue;
+                }
+                if (rl->chars[c] == close_ch) depth++;
+                else if (rl->chars[c] == open_ch) {
+                    if (depth == 0) { orow = r; ocol = c; break; }
+                    depth--;
+                }
+            }
+        }
+        if (orow == -1) {
+            for (int c = b->cx; c < ln->size; c++) {
+                if (ln->chars[c] == open_ch) { orow = b->cy; ocol = c; break; }
+            }
+        }
+    }
+    if (orow == -1) return 0;
+
+    int crow = -1, ccol = -1, depth = 0;
+    for (int r = orow; r <= max_r && crow == -1; r++) {
+        Line *rl = &b->lines[r];
+        int c0 = (r == orow) ? (ocol + 1) : 0;
+        for (int c = c0; c < rl->size; c++) {
+            if (rl->chars[c] == open_ch) depth++;
+            else if (rl->chars[c] == close_ch) {
+                if (depth == 0) { crow = r; ccol = c; break; }
+                depth--;
+            }
+        }
+    }
+    if (crow == -1) return 0;
+
+    if (mod == 'a') {
+        *sr = orow; *sc = ocol;
+        *er = crow; *ec = ccol + 1;
+    } else {
+        *sr = orow; *sc = ocol + 1;
+        *er = crow; *ec = ccol;
+    }
+    return 1;
+}
+
 static void paste_clipboard(Buffer *b) {
     if (!E.clipboard || !E.clipboard[0]) return;
     size_t len = strlen(E.clipboard);
@@ -147,13 +322,19 @@ static void handle_mouse(void) {
     int top_rows = E.cfg.show_tabs ? 1 : 0;
     int sb_w = (E.sidebar_visible && E.screen_cols > E.cfg.sidebar_width + 12)
                ? E.cfg.sidebar_width : 0;
+    int sb_start = (sb_w > 0) ? (E.cfg.sidebar_right ? (E.screen_cols - sb_w + 1) : 1) : 0;
+    int sb_end = (sb_w > 0) ? (sb_start + sb_w - 1) : 0;
+    int in_sb = (sb_w > 0 && mx >= sb_start && mx <= sb_end);
+    int ed_start = E.cfg.sidebar_right ? 1 : (sb_w > 0 ? sb_w + 2 : 1);
+    int ed_end = E.cfg.sidebar_right ? (sb_w > 0 ? sb_start - 2 : E.screen_cols) : E.screen_cols;
+    int in_ed = (mx >= ed_start && mx <= ed_end);
 
     Buffer *b = &E.buffers[E.cur_buf];
 
     /* Scroll wheel */
     if (btn == 64 || btn == 65) {
         int dir = (btn == 64) ? -3 : 3;
-        if (sb_w > 0 && mx <= sb_w) {
+        if (in_sb) {
             E.tree_sel += (dir > 0 ? 1 : -1);
             if (E.tree_sel < 0) E.tree_sel = 0;
             if (E.tree_sel >= E.tree_len) E.tree_sel = E.tree_len > 0 ? E.tree_len - 1 : 0;
@@ -184,10 +365,13 @@ static void handle_mouse(void) {
         return;
     }
 
-    if (my <= top_rows || my >= E.screen_rows - 1) return;
+    int status_rows = E.cfg.statusline ? 1 : 0;
+    int out_h = (E.output_visible && E.screen_rows > 12) ? E.cfg.output_height : 0;
+    int max_body_y = E.screen_rows - status_rows - 1 - out_h;
+    if (my <= top_rows || my > max_body_y) return;
 
     /* Click in sidebar */
-    if (sb_w > 0 && mx <= sb_w) {
+    if (in_sb) {
         E.focus = FOCUS_SIDEBAR;
         int rel_row = my - top_rows - 1;
         if (rel_row >= 1) {
@@ -201,7 +385,7 @@ static void handle_mouse(void) {
     }
 
     /* Click in editor */
-    if (mx > sb_w + (sb_w > 0 ? 1 : 0)) {
+    if (in_ed) {
         E.focus = FOCUS_EDITOR;
         int gutter_w = E.cfg.line_numbers ? 6 : 1;
         int target_y = b->rowoff + (my - top_rows - 1);
@@ -209,7 +393,7 @@ static void handle_mouse(void) {
         if (target_y >= b->num_lines) target_y = b->num_lines - 1;
         b->cy = target_y;
 
-        int target_rx = b->coloff + (mx - (sb_w + (sb_w > 0 ? 1 : 0) + gutter_w + 1));
+        int target_rx = b->coloff + (mx - (ed_start + gutter_w));
         if (target_rx < 0) target_rx = 0;
         Line *ln = &b->lines[b->cy];
         int rx = 0, i = 0;
@@ -385,6 +569,7 @@ static void handle_insert_key(int key, int ulen, const char *ubuf) {
     Buffer *b = &E.buffers[E.cur_buf];
 
     if (key == KEY_CTRL_SPACE) {
+        lsp_request_completion(E.cur_buf);
         ac_refresh(b, 1);
         return;
     }
@@ -500,6 +685,10 @@ static void handle_insert_key(int key, int ulen, const char *ubuf) {
                     }
                 }
                 buf_insert_bytes(b, ubuf, ulen);
+                if (ulen == 1 && (isalnum((unsigned char)ubuf[0]) || ubuf[0] == '_' ||
+                                  ubuf[0] == '.' || ubuf[0] == '>' || ubuf[0] == ':')) {
+                    lsp_request_completion(E.cur_buf);
+                }
                 ac_refresh(b, 0);
             }
             break;
@@ -513,11 +702,16 @@ static void handle_visual_key(int key, const char *ubuf) {
         if (mapped) key = mapped;
     }
 
-    int sy = b->vis_sy, ey = b->cy;
-    if (sy > ey) { int t = sy; sy = ey; ey = t; }
+    int sy = b->vis_sy, sx = b->vis_sx;
+    int ey = b->cy, ex = b->cx;
+    if (sy > ey || (sy == ey && sx > ex)) {
+        int ty = sy, tx = sx;
+        sy = ey; sx = ex;
+        ey = ty; ex = tx;
+    }
 
-    if (E.pending_g) {
-        E.pending_g = 0;
+    if (E.pending_op == 'g') {
+        E.pending_op = 0;
         if (key == 'c') {
             tools_toggle_comment(b, sy, ey);
             E.mode = MODE_NORMAL;
@@ -525,13 +719,37 @@ static void handle_visual_key(int key, const char *ubuf) {
         return;
     }
 
+    if (E.pending_obj_mod) {
+        char mod = E.pending_obj_mod;
+        E.pending_obj_mod = 0;
+        int osr = 0, osc = 0, oer = 0, oec = 0;
+        if (find_text_object(b, mod, key, &osr, &osc, &oer, &oec)) {
+            b->vis_sy = osr;
+            b->vis_sx = osc;
+            b->cy = oer;
+            if (oec > 0 && oer < b->num_lines) {
+                b->cx = utf8_prev_idx(b->lines[oer].chars, oec);
+            } else {
+                b->cx = 0;
+            }
+            clamp_cursor(b);
+        }
+        return;
+    }
+
     switch (key) {
         case KEY_ESC:
         case 'v':
+            E.pending_op = 0;
+            E.pending_obj_mod = 0;
             E.mode = MODE_NORMAL;
             break;
         case 'g':
-            E.pending_g = 1;
+            E.pending_op = 'g';
+            break;
+        case 'i':
+        case 'a':
+            E.pending_obj_mod = (char)key;
             break;
         case 'J':
             tools_move_lines(b, sy, ey, 1);
@@ -544,29 +762,34 @@ static void handle_visual_key(int key, const char *ubuf) {
         case '0': case '$':
             move_cursor(b, key);
             break;
+        case 'w':
+            move_word_forward(b);
+            break;
+        case 'b':
+            move_word_backward(b);
+            break;
         case 'y': {
-            size_t total = 0;
-            for (int r = sy; r <= ey; r++) total += (size_t)b->lines[r].size + 1;
-            free(E.clipboard);
-            E.clipboard = malloc(total + 1);
-            if (E.clipboard) {
-                size_t off = 0;
-                for (int r = sy; r <= ey; r++) {
-                    memcpy(E.clipboard + off, b->lines[r].chars, (size_t)b->lines[r].size);
-                    off += (size_t)b->lines[r].size;
-                    E.clipboard[off++] = '\n';
-                }
-                E.clipboard[off] = '\0';
-            }
+            Line *eln = &b->lines[ey];
+            int ec = (ex < eln->size) ? utf8_next_idx(eln->chars, eln->size, ex) : eln->size;
+            yank_range_to_clip(b, sy, sx, ey, ec);
             E.mode = MODE_NORMAL;
-            editor_set_status("%d line(s) yanked", ey - sy + 1);
+            editor_set_status("Selection yanked");
             break;
         }
         case 'd':
         case 'x':
-            for (int r = ey; r >= sy; r--) buf_delete_line(b, r);
-            E.mode = MODE_NORMAL;
+        case 'c': {
+            Line *eln = &b->lines[ey];
+            if (sy == ey && eln->size == 0) {
+                buf_delete_line(b, sy);
+            } else {
+                int ec = (ex < eln->size) ? utf8_next_idx(eln->chars, eln->size, ex) : eln->size;
+                buf_delete_range(b, sy, sx, ey, ec, 1);
+            }
+            E.mode = (key == 'c') ? MODE_INSERT : MODE_NORMAL;
+            if (E.mode != MODE_INSERT) clamp_cursor(b);
             break;
+        }
         case '>':
             for (int r = sy; r <= ey; r++) buf_indent_line(b, r, 1);
             E.mode = MODE_NORMAL;
@@ -578,6 +801,8 @@ static void handle_visual_key(int key, const char *ubuf) {
     }
 }
 
+static void dispatch_key(int key, int ulen, const char *ubuf);
+
 static void handle_normal_key(int key, const char *ubuf) {
     Buffer *b = &E.buffers[E.cur_buf];
 
@@ -586,9 +811,15 @@ static void handle_normal_key(int key, const char *ubuf) {
         if (mapped) key = mapped;
     }
 
-    /* <Space> f ... sequences (ff = fuzzy find, fg = grep) */
+    if (E.hover_visible) {
+        E.hover_visible = 0;
+        if (key == KEY_ESC) return;
+    }
+
+    /* <Space> f ... sequences (ff = fuzzy find, fg = grep, fm = format) */
     if (E.pending_f) {
         E.pending_f = 0;
+        E.count_prefix = 0;
         if (key == 'f') {
             tools_fuzzy_find();
         } else if (key == 'g') {
@@ -601,21 +832,24 @@ static void handle_normal_key(int key, const char *ubuf) {
         return;
     }
 
-    if (E.pending_bracket_next) {
-        E.pending_bracket_next = 0;
-        if (key == 'd') tools_next_diag(b, 1);
-        return;
-    }
-
-    if (E.pending_bracket_prev) {
-        E.pending_bracket_prev = 0;
-        if (key == 'd') tools_next_diag(b, -1);
+    /* <Space> r ... sequences (rn = LSP rename, rr = run current file) */
+    if (E.pending_r) {
+        E.pending_r = 0;
+        E.count_prefix = 0;
+        if (key == 'n') {
+            char nn[128] = {0};
+            editor_prompt_input("Rename symbol to: ", nn, sizeof(nn));
+            if (nn[0]) lsp_request_rename(E.cur_buf, nn);
+        } else if (key == 'r' || key == KEY_ENTER) {
+            tools_run_current();
+        }
         return;
     }
 
     /* Leader sequences (<Space> + ...) */
     if (E.pending_leader) {
         E.pending_leader = 0;
+        E.count_prefix = 0;
         if (key == 'e') {
             E.sidebar_visible = !E.sidebar_visible;
             E.focus = E.sidebar_visible ? FOCUS_SIDEBAR : FOCUS_EDITOR;
@@ -623,7 +857,8 @@ static void handle_normal_key(int key, const char *ubuf) {
         } else if (key == 'f') {
             E.pending_f = 1;
         } else if (key == 'r') {
-            tools_run_current();
+            E.pending_r = 1;
+            editor_set_status("<Space>r: n=Rename symbol (LSP)  r=Run file");
         } else if (key == 't') {
             tools_spawn_shell();
         } else if (key == 'v') {
@@ -649,95 +884,293 @@ static void handle_normal_key(int key, const char *ubuf) {
         return;
     }
 
-    if (E.pending_c) {
-        E.pending_c = 0;
-        if (key == 'c') {
-            tools_toggle_comment(b, b->cy, b->cy);
+    if (E.pending_op == 'q') {
+        E.pending_op = 0;
+        E.count_prefix = 0;
+        if (key >= 'a' && key <= 'z') {
+            int reg = key - 'a';
+            E.macro_recording = 1;
+            E.macro_rec_reg = (char)key;
+            E.macro_lens[reg] = 0;
+            editor_set_status("Recording @%c", key);
         }
         return;
     }
 
-    if (E.pending_g) {
-        E.pending_g = 0;
+    if (E.pending_op == '@') {
+        E.pending_op = 0;
+        int cnt = take_count();
+        int reg = -1;
+        if (key >= 'a' && key <= 'z') reg = key - 'a';
+        else if (key == '@' && E.macro_rec_reg >= 'a' && E.macro_rec_reg <= 'z') {
+            reg = E.macro_rec_reg - 'a';
+        }
+        if (reg >= 0 && E.macro_lens[reg] > 0 && E.macro_playing < 4) {
+            E.macro_playing++;
+            for (int rep = 0; rep < cnt && E.running; rep++) {
+                for (int k = 0; k < E.macro_lens[reg] && E.running; k++) {
+                    MacroKey *mk = &E.macros[reg][k];
+                    dispatch_key(mk->key, mk->ulen, mk->ubuf);
+                }
+            }
+            E.macro_playing--;
+        }
+        return;
+    }
+
+    /* Text object completion (e.g. c/d/y + i/a + w/"/(/{) */
+    if (E.pending_obj_mod && (E.pending_op == 'd' || E.pending_op == 'c' || E.pending_op == 'y')) {
+        char op = E.pending_op;
+        char mod = E.pending_obj_mod;
+        E.pending_op = 0;
+        E.pending_obj_mod = 0;
+        E.count_prefix = 0;
+        int osr = 0, osc = 0, oer = 0, oec = 0;
+        if (find_text_object(b, mod, key, &osr, &osc, &oer, &oec)) {
+            if (op == 'y') {
+                yank_range_to_clip(b, osr, osc, oer, oec);
+                editor_set_status("Yanked");
+            } else {
+                buf_delete_range(b, osr, osc, oer, oec, 1);
+                if (op == 'c') {
+                    E.mode = MODE_INSERT;
+                } else {
+                    clamp_cursor(b);
+                }
+            }
+        }
+        return;
+    }
+
+    if (E.pending_op == 'C') {
+        E.pending_op = 0;
+        E.count_prefix = 0;
+        if (key == 'c') tools_toggle_comment(b, b->cy, b->cy);
+        return;
+    }
+
+    if (E.pending_op == 'g') {
+        E.pending_op = 0;
         if (key == 'g') {
-            b->cy = 0;
+            int ln_no = (E.count_prefix > 0) ? take_count() : 1;
+            if (ln_no < 1) ln_no = 1;
+            if (ln_no > b->num_lines) ln_no = b->num_lines;
+            b->cy = ln_no - 1;
             b->cx = 0;
             clamp_cursor(b);
-        } else if (key == 'c') {
-            E.pending_c = 1;
-        } else if (key == 'f') {
-            tools_jump_grep_line(b);
-        }
-        return;
-    }
-
-    if (E.pending_d) {
-        E.pending_d = 0;
-        if (key == 'd') buf_delete_line(b, b->cy);
-        return;
-    }
-
-    if (E.pending_y) {
-        E.pending_y = 0;
-        if (key == 'y') {
-            Line *ln = &b->lines[b->cy];
-            free(E.clipboard);
-            E.clipboard = malloc((size_t)ln->size + 2);
-            if (E.clipboard) {
-                memcpy(E.clipboard, ln->chars, (size_t)ln->size);
-                E.clipboard[ln->size] = '\n';
-                E.clipboard[ln->size + 1] = '\0';
+        } else {
+            E.count_prefix = 0;
+            if (key == 'd') {
+                lsp_request_definition(E.cur_buf);
+            } else if (key == 'r') {
+                lsp_request_references(E.cur_buf);
+            } else if (key == 'c') {
+                E.pending_op = 'C';
+            } else if (key == 'f') {
+                tools_jump_grep_line(b);
             }
-            editor_set_status("1 line yanked");
         }
+        return;
+    }
+
+    if (E.pending_op == ']') {
+        E.pending_op = 0;
+        E.count_prefix = 0;
+        if (key == 'd') tools_next_diag(b, 1);
+        return;
+    }
+
+    if (E.pending_op == '[') {
+        E.pending_op = 0;
+        E.count_prefix = 0;
+        if (key == 'd') tools_next_diag(b, -1);
+        return;
+    }
+
+    if (E.pending_op == '>' || E.pending_op == '<') {
+        char op = E.pending_op;
+        E.pending_op = 0;
+        int cnt = take_count();
+        if (key == op) {
+            for (int k = 0; k < cnt && b->cy + k < b->num_lines; k++) {
+                buf_indent_line(b, b->cy + k, op == '>' ? 1 : -1);
+            }
+        }
+        return;
+    }
+
+    if (E.pending_op == 'd' || E.pending_op == 'c' || E.pending_op == 'y') {
+        char op = E.pending_op;
+        if ((key >= '1' && key <= '9') || (key == '0' && E.count_prefix > 0)) {
+            if (E.count_prefix < 10000) E.count_prefix = E.count_prefix * 10 + (key - '0');
+            return;
+        }
+        if (key == 'i' || key == 'a') {
+            E.pending_obj_mod = (char)key;
+            return;
+        }
+        E.pending_op = 0;
+        int cnt = take_count();
+        if (key == op) {
+            if (op == 'd') {
+                for (int k = 0; k < cnt; k++) buf_delete_line(b, b->cy);
+                clamp_cursor(b);
+            } else if (op == 'y') {
+                yank_lines_to_clip(b, b->cy, cnt);
+            } else if (op == 'c') {
+                for (int k = 1; k < cnt && b->num_lines > 1; k++) buf_delete_line(b, b->cy);
+                Line *ln = &b->lines[b->cy];
+                int ind = 0;
+                while (ind < ln->size && (ln->chars[ind] == ' ' || ln->chars[ind] == '\t')) ind++;
+                if (ln->size > ind) buf_delete_range(b, b->cy, ind, b->cy, ln->size, 1);
+                b->cx = ind;
+                E.mode = MODE_INSERT;
+            }
+        } else if (key == 'w' || key == 'e') {
+            int sy = b->cy, sx = b->cx;
+            Line *ln = &b->lines[b->cy];
+            int ex = sx;
+            for (int k = 0; k < cnt; k++) {
+                while (ex < ln->size && !isspace((unsigned char)ln->chars[ex])) ex++;
+                if (key == 'w') {
+                    while (ex < ln->size && isspace((unsigned char)ln->chars[ex])) ex++;
+                }
+            }
+            if (op == 'y') {
+                yank_range_to_clip(b, sy, sx, sy, ex);
+                editor_set_status("Yanked");
+            } else {
+                buf_delete_range(b, sy, sx, sy, ex, 1);
+                if (op == 'c') E.mode = MODE_INSERT;
+                else clamp_cursor(b);
+            }
+        } else if (key == '$') {
+            int ex = b->lines[b->cy].size;
+            if (op == 'y') {
+                yank_range_to_clip(b, b->cy, b->cx, b->cy, ex);
+                editor_set_status("Yanked");
+            } else {
+                buf_delete_range(b, b->cy, b->cx, b->cy, ex, 1);
+                if (op == 'c') E.mode = MODE_INSERT;
+                else clamp_cursor(b);
+            }
+        }
+        return;
+    }
+
+    if ((key >= '1' && key <= '9') || (key == '0' && E.count_prefix > 0)) {
+        if (E.count_prefix < 10000) E.count_prefix = E.count_prefix * 10 + (key - '0');
         return;
     }
 
     switch (key) {
+        case 'q':
+            E.count_prefix = 0;
+            if (E.macro_recording) {
+                int reg = (E.macro_rec_reg >= 'a' && E.macro_rec_reg <= 'z')
+                          ? (E.macro_rec_reg - 'a') : 0;
+                E.macro_recording = 0;
+                editor_set_status("Recorded @%c (%d keys)",
+                                  E.macro_rec_reg ? E.macro_rec_reg : '?',
+                                  E.macro_lens[reg]);
+            } else {
+                E.pending_op = 'q';
+            }
+            break;
+        case '@':
+            E.pending_op = '@';
+            break;
         case ' ':
+            E.count_prefix = 0;
             E.pending_leader = 1;
             break;
         case 'g':
-            E.pending_g = 1;
+            E.pending_op = 'g';
             break;
-        case 'G':
-            b->cy = b->num_lines - 1;
+        case 'G': {
+            if (E.count_prefix > 0) {
+                int ln_no = take_count();
+                if (ln_no < 1) ln_no = 1;
+                if (ln_no > b->num_lines) ln_no = b->num_lines;
+                b->cy = ln_no - 1;
+            } else {
+                b->cy = b->num_lines - 1;
+            }
             b->cx = 0;
             clamp_cursor(b);
             break;
+        }
         case 'd':
-            E.pending_d = 1;
+            E.pending_op = 'd';
+            break;
+        case 'c':
+            E.pending_op = 'c';
             break;
         case 'y':
-            E.pending_y = 1;
+            E.pending_op = 'y';
             break;
-        case 'p':
-            paste_clipboard(b);
-            break;
-        case 'u':
-            buf_undo(b);
-            break;
-        case 'x':
-            buf_delete_at_cursor(b);
+        case 'D':
+            E.count_prefix = 0;
+            buf_delete_range(b, b->cy, b->cx, b->cy, b->lines[b->cy].size, 1);
             clamp_cursor(b);
+            break;
+        case 'C':
+            E.count_prefix = 0;
+            buf_delete_range(b, b->cy, b->cx, b->cy, b->lines[b->cy].size, 1);
+            E.mode = MODE_INSERT;
+            break;
+        case 'p': {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) paste_clipboard(b);
+            break;
+        }
+        case 'u': {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) buf_undo(b);
+            clamp_cursor(b);
+            break;
+        }
+        case CTRL_KEY('r'): {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) buf_redo(b);
+            clamp_cursor(b);
+            break;
+        }
+        case 'x': {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) buf_delete_at_cursor(b);
+            clamp_cursor(b);
+            break;
+        }
+        case 'K':
+            E.count_prefix = 0;
+            lsp_request_hover(E.cur_buf);
             break;
         case 'h': case 'j': case 'k': case 'l':
         case KEY_ARROW_LEFT: case KEY_ARROW_DOWN: case KEY_ARROW_UP: case KEY_ARROW_RIGHT:
         case '0': case '$': case KEY_HOME: case KEY_END:
         case KEY_PAGE_UP: case KEY_PAGE_DOWN:
-        case CTRL_KEY('u'): case CTRL_KEY('d'):
-            move_cursor(b, key);
+        case CTRL_KEY('u'): case CTRL_KEY('d'): {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) move_cursor(b, key);
             break;
-        case 'w':
-            move_word_forward(b);
+        }
+        case 'w': {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) move_word_forward(b);
             break;
-        case 'b':
-            move_word_backward(b);
+        }
+        case 'b': {
+            int cnt = take_count();
+            for (int k = 0; k < cnt; k++) move_word_backward(b);
             break;
+        }
         case 'i':
+            E.count_prefix = 0;
             E.mode = MODE_INSERT;
             break;
         case 'I':
+            E.count_prefix = 0;
             b->cx = 0;
             while (b->cx < b->lines[b->cy].size &&
                    (b->lines[b->cy].chars[b->cx] == ' ' || b->lines[b->cy].chars[b->cx] == '\t')) {
@@ -746,21 +1179,25 @@ static void handle_normal_key(int key, const char *ubuf) {
             E.mode = MODE_INSERT;
             break;
         case 'a':
+            E.count_prefix = 0;
             if (b->cx < b->lines[b->cy].size) {
                 b->cx = utf8_next_idx(b->lines[b->cy].chars, b->lines[b->cy].size, b->cx);
             }
             E.mode = MODE_INSERT;
             break;
         case 'A':
+            E.count_prefix = 0;
             b->cx = b->lines[b->cy].size;
             E.mode = MODE_INSERT;
             break;
         case 'o':
+            E.count_prefix = 0;
             b->cx = b->lines[b->cy].size;
             buf_insert_newline(b);
             E.mode = MODE_INSERT;
             break;
         case 'O': {
+            E.count_prefix = 0;
             b->cx = 0;
             buf_insert_newline(b);
             b->cy--;
@@ -769,11 +1206,13 @@ static void handle_normal_key(int key, const char *ubuf) {
             break;
         }
         case 'v':
+            E.count_prefix = 0;
             b->vis_sx = b->cx;
             b->vis_sy = b->cy;
             E.mode = MODE_VISUAL;
             break;
         case ':':
+            E.count_prefix = 0;
             E.mode = MODE_COMMAND;
             E.cmd_len = 0;
             E.cmd_pos = 0;
@@ -781,36 +1220,47 @@ static void handle_normal_key(int key, const char *ubuf) {
             E.cmd_hist_idx = E.cmd_hist_len;
             break;
         case '/':
+            E.count_prefix = 0;
             E.mode = MODE_SEARCH;
             E.search_len = 0;
             E.search_buf[0] = '\0';
             break;
         case 'n':
+            E.count_prefix = 0;
             if (E.search_len > 0) buf_find(b, E.search_buf, 1);
             break;
         case 'N':
+            E.count_prefix = 0;
             if (E.search_len > 0) buf_find(b, E.search_buf, -1);
             break;
         case KEY_ESC:
+            E.count_prefix = 0;
+            E.pending_op = 0;
+            E.pending_obj_mod = 0;
             E.search_len = 0;
             E.search_buf[0] = '\0';
             break;
         case CTRL_KEY('b'):
         case KEY_F2:
+            E.count_prefix = 0;
             E.sidebar_visible = !E.sidebar_visible;
             E.focus = E.sidebar_visible ? FOCUS_SIDEBAR : FOCUS_EDITOR;
             if (E.sidebar_visible) tree_refresh();
             break;
         case KEY_F5:
+            E.count_prefix = 0;
             tools_run_current();
             break;
         case CTRL_KEY('p'):
+            E.count_prefix = 0;
             tools_fuzzy_find();
             break;
         case CTRL_KEY('j'):
+            E.count_prefix = 0;
             tools_toggle_output();
             break;
         case CTRL_KEY('w'):
+            E.count_prefix = 0;
             if (E.split_mode != SPLIT_NONE) {
                 int tmp = E.cur_buf;
                 E.cur_buf = E.split_buf;
@@ -821,40 +1271,70 @@ static void handle_normal_key(int key, const char *ubuf) {
             }
             break;
         case 'm':
+            E.count_prefix = 0;
             tools_toggle_bookmark(b, b->cy);
             break;
         case 'M':
+            E.count_prefix = 0;
             tools_next_bookmark(b);
             break;
         case KEY_ENTER:
+            E.count_prefix = 0;
             if (b->filename && strcmp(b->filename, "[Grep]") == 0) {
                 tools_jump_grep_line(b);
             }
             break;
         case CTRL_KEY('h'):
+            E.count_prefix = 0;
             if (E.sidebar_visible) E.focus = FOCUS_SIDEBAR;
             break;
         case CTRL_KEY('l'):
+            E.count_prefix = 0;
             E.focus = FOCUS_EDITOR;
             break;
         case KEY_TAB:
+            E.count_prefix = 0;
             E.cur_buf = (E.cur_buf + 1) % E.num_buffers;
             break;
         case KEY_SHIFT_TAB:
+            E.count_prefix = 0;
             E.cur_buf = (E.cur_buf - 1 + E.num_buffers) % E.num_buffers;
             break;
         case ']':
-            E.pending_bracket_next = 1;
+            E.pending_op = ']';
             break;
         case '[':
-            E.pending_bracket_prev = 1;
+            E.pending_op = '[';
             break;
         case '>':
-            buf_indent_line(b, b->cy, 1);
+            E.pending_op = '>';
             break;
         case '<':
-            buf_indent_line(b, b->cy, -1);
+            E.pending_op = '<';
             break;
+        default:
+            E.count_prefix = 0;
+            break;
+    }
+}
+
+static void dispatch_key(int key, int ulen, const char *ubuf) {
+    if (key == KEY_MOUSE) {
+        handle_mouse();
+        return;
+    }
+    if (E.mode == MODE_COMMAND) {
+        handle_command_key(key, ulen, ubuf);
+    } else if (E.mode == MODE_SEARCH) {
+        handle_search_key(key, ulen, ubuf);
+    } else if (E.mode == MODE_INSERT) {
+        handle_insert_key(key, ulen, ubuf);
+    } else if (E.mode == MODE_VISUAL) {
+        handle_visual_key(key, ubuf);
+    } else if (E.focus == FOCUS_SIDEBAR) {
+        handle_sidebar_key(key, ubuf);
+    } else {
+        handle_normal_key(key, ubuf);
     }
 }
 
@@ -892,15 +1372,24 @@ int main(int argc, char **argv) {
     E.cur_buf = 0;
 
     const char *tree_root = ".";
-    int opened_any_file = 0;
-
     for (int i = 1; i < argc; i++) {
         struct stat st;
         if (stat(argv[i], &st) == 0 && S_ISDIR(st.st_mode)) {
             tree_root = argv[i];
             E.sidebar_visible = 1;
             E.focus = FOCUS_SIDEBAR;
-        } else {
+            break;
+        }
+    }
+
+    tree_init(tree_root);
+    tools_refresh_git_branch();
+    lsp_init_all();
+
+    int opened_any_file = 0;
+    for (int i = 1; i < argc; i++) {
+        struct stat st;
+        if (!(stat(argv[i], &st) == 0 && S_ISDIR(st.st_mode))) {
             buf_open(argv[i]);
             opened_any_file = 1;
         }
@@ -911,20 +1400,27 @@ int main(int argc, char **argv) {
         E.focus = FOCUS_SIDEBAR;
     }
 
-    tree_init(tree_root);
-    tools_refresh_git_branch();
     term_enable_raw();
     term_update_size();
-    editor_set_status("catingiran v%s | :help for commands | Ctrl+B sidebar", CTI_VERSION);
+    editor_set_status("catingiran v%s | :help | :conf | Ctrl+B sidebar | gd/K LSP", CTI_VERSION);
 
     int need_render = 1;
     int prev_rows = E.screen_rows, prev_cols = E.screen_cols;
     while (E.running) {
+        if (lsp_poll_events()) need_render = 1;
         if (need_render || E.screen_rows != prev_rows || E.screen_cols != prev_cols) {
             prev_rows = E.screen_rows;
             prev_cols = E.screen_cols;
             ui_render();
             need_render = 0;
+        }
+
+        int wait_res = term_wait_input(50);
+        if (lsp_poll_events()) need_render = 1;
+        if (wait_res == 0) continue;
+        if (wait_res == 2) {
+            need_render = 1;
+            continue;
         }
 
         int ulen = 0;
@@ -934,26 +1430,25 @@ int main(int argc, char **argv) {
 
         need_render = 1;
 
-        if (key == KEY_MOUSE) {
-            handle_mouse();
-            continue;
+        if (E.macro_recording && !E.macro_playing) {
+            int stop_rec = (E.mode == MODE_NORMAL && E.focus == FOCUS_EDITOR &&
+                            !E.pending_op && !E.pending_leader &&
+                            !E.pending_f && !E.pending_r && key == 'q');
+            if (!stop_rec && E.macro_rec_reg >= 'a' && E.macro_rec_reg <= 'z') {
+                int reg = E.macro_rec_reg - 'a';
+                if (E.macro_lens[reg] < MAX_MACRO_KEYS) {
+                    MacroKey *mk = &E.macros[reg][E.macro_lens[reg]++];
+                    mk->key = key;
+                    mk->ulen = ulen;
+                    memcpy(mk->ubuf, ubuf, 5);
+                }
+            }
         }
 
-        if (E.mode == MODE_COMMAND) {
-            handle_command_key(key, ulen, ubuf);
-        } else if (E.mode == MODE_SEARCH) {
-            handle_search_key(key, ulen, ubuf);
-        } else if (E.mode == MODE_INSERT) {
-            handle_insert_key(key, ulen, ubuf);
-        } else if (E.mode == MODE_VISUAL) {
-            handle_visual_key(key, ubuf);
-        } else if (E.focus == FOCUS_SIDEBAR) {
-            handle_sidebar_key(key, ubuf);
-        } else {
-            handle_normal_key(key, ubuf);
-        }
+        dispatch_key(key, ulen, ubuf);
     }
 
+    lsp_shutdown_all();
     term_disable_raw();
     for (int i = 0; i < E.num_buffers; i++) buf_free(&E.buffers[i]);
     tree_free();

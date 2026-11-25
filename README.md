@@ -1,32 +1,40 @@
-# catingiran (`cti`)
+# catingiran (`cti`) v1.0.0
 
-Быстрая терминальная IDE и редактор кода на чистом C в стиле Vim/OnVim под лицензией **BSD-3-Clause**.
+Быстрая терминальная IDE и редактор кода на чистом C11 в стиле Vim / OnVim под лицензией **BSD-3-Clause** без внешних библиотек сборки.
 
-## Возможности
-* **Проводник файлов как в VS Code** (`Ctrl+B` / `:ot` / `:ht`) с иконками Nerd Font и созданием/удалением/переименованием файлов.
-* **Подсветка синтаксиса**: C/C++, Python, Java, JS/TS, Shell/Makefile, Conf/Markdown + 6 встроенных тем (`charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light`).
-* **Встроенный менеджер плагинов**: `plugin = user/repo` в `catingiran.conf`, команды `:PlugInstall`, `:PlugUpdate`, `:PlugStatus`, `:PlugClean`, `:PlugAdd`.
-* **Уникальные IDE-инструменты**:
-  * Встроенный запуск кода (`F5` / `:run`) для C, C++, Python, Java, Shell, Make с нижней панелью вывода (`Ctrl+J`).
+## Основные возможности
+
+* **Vim-движок мирового уровня**:
+  * Счётчики команд (`5dd`, `10j`, `3w`, `4x`) и операторы с текстовыми объектами (`ciw`, `diw`, `yiw`, `di"`, `da"`, `di(`, `da(`, `di{`, `da{`, `vi(`).
+  * Запись и воспроизведение макросов (`qa` ... `q`, `@a`, `2@a`), `Undo` (`u`) и `Redo` (`Ctrl+R` / `:redo`).
+  * Поиск и замена во всём файле `:%s/старое/новое/g` и в текущей строке `:s/старое/новое/g` с поддержкой `ignore_case` и `smart_case`.
+* **Настоящий асинхронный LSP-клиент (JSON-RPC 2.0)**:
+  * Автозапуск `clangd` (C/C++), `pyright-langserver` / `pylsp` (Python) и `jdtls` (Java).
+  * Живая диагностика ошибок прямо в редакторе (`●`/`▲`), переход к определению (`gd`), поиск ссылок (`gr`), всплывающая документация (`K`), переименование символа (`Space + rn`) и `:lsp`.
+* **Умный Live-автокомплит**: всплывающее меню дополнения символов от LSP, плагинов, стандартных сниппетов и буфера (`Tab` / `S-Tab` / `Enter` / `Ctrl+Space`).
+* **Проводник файлов как в VS Code**: левая или правая боковая панель (`Ctrl+B` / `F2` / `:ot` / `:ht`) с иконками Nerd Font, мышью и созданием/удалением/переименованием файлов.
+* **IDE-инструменты**:
+  * Встроенный компилятор и запуск (`F5` / `:run` / `Space+rr`) с нижней панелью вывода (`Ctrl+J`).
   * Вертикальные и горизонтальные сплиты (`:vsplit`, `:split`, `Ctrl+W`).
-  * Поиск файлов (`Ctrl+P` / `:find`) и поиск текста по проекту (`:grep` + переход по `Enter`).
-  * Git-интеграция (ветка в статус-лайне, `:git`, `:diff`) и статистика кода (`:stats`).
-  * Встроенный терминал (`:term`), закладки (`m` / `M`), комментирование (`gcc`), перемещение строк (`J`/`K` в Visual) и поддержка русской раскладки в Normal/Command режиме.
+  * Нечёткий поиск файлов (`Ctrl+P` / `:find`) и поиск по проекту (`:grep` + `Enter`).
+  * Git-ветка в статус-лайне, `:git`, `:diff`, статистика проекта `:stats`, закладки (`m`/`M`), комментарии (`gcc`/`gc`), терминал (`:term`).
+* **Встроенный менеджер плагинов (`catingiran Plug`)**: готовые пакеты (`python`, `c`, `java`, `web`, `git-extras`) и GitHub-плагины (`:PlugAdd user/repo`).
+* **Гибкая настройка**: 35+ параметров в `~/.config/catingiran/catingiran.conf` и 6 тем (`charcoal`, `obsidian`, `catppuccin`, `tokyonight`, `nord`, `light`).
 
-## Быстрая установка
+## Установка и удаление
 
 ```sh
 git clone https://github.com/netanyahy/catingiran.git
 cd catingiran
 make
-sudo make install
+sudo make install   # на Gentoo с doas: doas make install
 ```
 
-Запуск и редактирование настроек:
+Запуск и личный конфиг:
 ```sh
 cti
 ```
-Личный конфиг находится в `~/.config/catingiran/catingiran.conf` (или откройте из редактора командой `:conf`).
+Конфиг располагается в `~/.config/catingiran/catingiran.conf` (редактируется внутри IDE командой `:conf`, применяется без перезапуска через `:reload`).
 
 Удаление:
 ```sh
@@ -34,7 +42,7 @@ sudo make uninstall
 ```
 
 ## Документация
-* Русская инструкция: [howtomakeru.md](howtomakeru.md)
-* English guide: [howtomake.en](howtomake.en)
-* Пресет конфига: [catingiran.conf](catingiran.conf)
-
+* Подробная русская инструкция: [howtomakeru.md](howtomakeru.md)
+* Full English guide: [howtomake.en](howtomake.en)
+* Готовый пресет конфигурации: [catingiran.conf](catingiran.conf)
+* Лицензия (BSD-3-Clause): [LICENSE](LICENSE)

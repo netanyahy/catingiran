@@ -2,16 +2,19 @@
 #define CATINGIRAN_STATE_H
 
 #include <stddef.h>
+#include <sys/types.h>
 #include <time.h>
 
-#define CTI_VERSION "0.3.0"
+#define CTI_VERSION "1.0.0"
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define MAX_BUFFERS 32
 #define MAX_PLUGINS 32
 #define MAX_PLUGIN_CMDS 64
 #define MAX_PLUGIN_WORDS 1024
 #define MAX_OUTPUT_LINES 200
-#define MAX_AC_ITEMS 12
+#define MAX_AC_ITEMS 14
+#define MAX_LSP_SERVERS 4
+#define MAX_MACRO_KEYS 512
 
 typedef enum {
     KEY_NULL = 0,
@@ -136,22 +139,39 @@ typedef struct {
 
 typedef struct {
     char theme[32];
+    int show_tabs;
+    int statusline;
+    int line_numbers;
+    int relative_numbers;
+    int cursorline;
+    int colorcolumn;
+    int nerd_icons;
     int tab_size;
     int expand_tab;
-    int line_numbers;
-    int cursorline;
     int auto_indent;
     int auto_pairs;
-    int auto_complete;
-    int auto_lint;
+    int highlight_current_word;
+    int trailing_whitespace;
+    int trim_on_save;
+    int scrolloff;
     int mouse_enabled;
+    int russian_keymap;
+    int ignore_case;
+    int smart_case;
+    int hl_search;
+    int undo_levels;
+    int persistent_undo;
+    int confirm_quit;
     int sidebar_open_on_start;
     int sidebar_width;
+    int sidebar_right; /* 0=left, 1=right */
     int show_hidden;
-    int nerd_icons;
-    int russian_keymap;
-    int show_tabs;
     int output_height;
+    int auto_complete;
+    int autocomplete_min_chars;
+    int auto_lint;
+    int lsp_enabled;
+    int lsp_auto_hover;
     int git_branch;
     PluginSpec plugins[MAX_PLUGINS];
     int num_plugins;
@@ -201,9 +221,14 @@ typedef struct {
     int syntax_id;
     int syntax_manual;
     int readonly;
+    int lsp_version;
+    int lsp_opened;
     UndoAction *undo;
     int undo_len;
     int undo_cap;
+    UndoAction *redo;
+    int redo_len;
+    int redo_cap;
     int undo_recording;
 } Buffer;
 
@@ -228,6 +253,60 @@ typedef struct {
     int cap;
 } Abuf;
 
+/* Minimal JSON value tree for LSP JSON-RPC 2.0 */
+typedef enum {
+    J_NULL = 0,
+    J_BOOL,
+    J_NUM,
+    J_STR,
+    J_ARR,
+    J_OBJ
+} JsonType;
+
+typedef struct JsonVal JsonVal;
+struct JsonVal {
+    JsonType type;
+    int bool_val;
+    double num_val;
+    char *str_val;
+    JsonVal **items;
+    char **keys;
+    int count;
+};
+
+typedef enum {
+    LSP_REQ_NONE = 0,
+    LSP_REQ_INIT,
+    LSP_REQ_COMPLETION,
+    LSP_REQ_HOVER,
+    LSP_REQ_DEFINITION,
+    LSP_REQ_REFERENCES,
+    LSP_REQ_RENAME
+} LspReqKind;
+
+typedef struct {
+    int active;
+    int initialized;
+    int lang_id; /* SYN_C, SYN_PYTHON, SYN_JAVA */
+    char name[32];
+    pid_t pid;
+    int fd_in;  /* write to server */
+    int fd_out; /* read from server */
+    char *rx_buf;
+    int rx_len;
+    int rx_cap;
+    int next_id;
+    int last_req_id;
+    LspReqKind last_req_kind;
+    int req_buf_idx;
+} LspServer;
+
+typedef struct {
+    int key;
+    int ulen;
+    char ubuf[5];
+} MacroKey;
+
 typedef struct {
     int screen_rows;
     int screen_cols;
@@ -236,7 +315,7 @@ typedef struct {
     int cur_buf;
     SplitMode split_mode;
     int split_buf;
-    int active_pane; /* 0 = primary, 1 = secondary */
+    int active_pane;
     TreeNode *tree;
     int tree_len;
     int tree_cap;
@@ -264,15 +343,20 @@ typedef struct {
     char status_msg[256];
     time_t status_msg_time;
     char *clipboard;
-    int pending_g;
-    int pending_d;
-    int pending_y;
-    int pending_c;
+    /* Vim grammar state */
+    int count_prefix;
+    char pending_op; /* 'd', 'c', 'y', 'g', '>', '<', ']', '[' */
+    char pending_obj_mod; /* 'i' or 'a' */
     int pending_leader;
     int pending_f;
-    int pending_bracket_next;
-    int pending_bracket_prev;
-    int quit_warn;
+    int pending_r;
+    /* Macros */
+    int macro_recording;
+    char macro_rec_reg;
+    MacroKey macros[26][MAX_MACRO_KEYS];
+    int macro_lens[26];
+    int macro_playing;
+    /* Mouse & Config */
     MouseEvent last_mouse;
     Config cfg;
     Theme theme;
@@ -280,15 +364,22 @@ typedef struct {
     int num_plugin_cmds;
     PluginWord plugin_words[MAX_PLUGIN_WORDS];
     int num_plugin_words;
-    /* Autocomplete popup state */
+    /* Autocomplete popup */
     int ac_visible;
     char ac_items[MAX_AC_ITEMS][64];
     char ac_kinds[MAX_AC_ITEMS][16];
     int ac_count;
     int ac_sel;
     int ac_prefix_len;
-    int ac_cursor_row;
-    int ac_cursor_col;
+    /* Floating hover / info popup */
+    int hover_visible;
+    char hover_lines[16][128];
+    int hover_count;
+    /* LSP servers & completions cache */
+    LspServer lsp[MAX_LSP_SERVERS];
+    char lsp_ac_items[MAX_AC_ITEMS][64];
+    char lsp_ac_kinds[MAX_AC_ITEMS][16];
+    int lsp_ac_count;
     int running;
 } EditorState;
 
@@ -298,6 +389,7 @@ extern EditorState E;
 void term_enable_raw(void);
 void term_disable_raw(void);
 void term_update_size(void);
+int term_wait_input(int timeout_ms);
 int term_read_key(int *utf8_bytes_out, char utf8_buf[5]);
 void ab_append(Abuf *ab, const char *s, int len);
 void ab_append_str(Abuf *ab, const char *s);
@@ -330,9 +422,12 @@ void buf_insert_newline(Buffer *b);
 void buf_backspace(Buffer *b);
 void buf_delete_at_cursor(Buffer *b);
 void buf_delete_line(Buffer *b, int row);
+void buf_delete_range(Buffer *b, int sr, int sc, int er, int ec, int copy_to_clip);
 void buf_indent_line(Buffer *b, int row, int delta);
 void buf_undo(Buffer *b);
+void buf_redo(Buffer *b);
 void buf_find(Buffer *b, const char *query, int dir);
+int buf_replace_all(Buffer *b, const char *old_s, const char *new_s, int cur_line_only);
 void buf_raw_insert_at(Buffer *b, int row, int col, const char *s, int len);
 void buf_raw_delete_at(Buffer *b, int row, int col, int len);
 
@@ -403,5 +498,27 @@ void ac_refresh(Buffer *b, int force);
 void ac_dismiss(void);
 void ac_move(int delta);
 void ac_accept(Buffer *b);
+
+/* json.c */
+JsonVal *json_parse(const char *s);
+void json_free(JsonVal *v);
+JsonVal *json_get(JsonVal *obj, const char *key);
+const char *json_str(JsonVal *v);
+double json_num(JsonVal *v, double def);
+char *json_escape(const char *s);
+
+/* lsp.c */
+void lsp_init_all(void);
+void lsp_shutdown_all(void);
+void lsp_on_buf_open(int buf_idx);
+void lsp_on_buf_change(int buf_idx);
+void lsp_on_buf_save(int buf_idx);
+void lsp_request_completion(int buf_idx);
+void lsp_request_hover(int buf_idx);
+void lsp_request_definition(int buf_idx);
+void lsp_request_references(int buf_idx);
+void lsp_request_rename(int buf_idx, const char *new_name);
+int lsp_poll_events(void);
+void lsp_status_report(void);
 
 #endif /* CATINGIRAN_STATE_H */
