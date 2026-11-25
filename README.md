@@ -46,3 +46,7 @@ sudo make uninstall
 * Full English guide: [howtomake.en](howtomake.en)
 * Готовый пресет конфигурации: [catingiran.conf](catingiran.conf)
 * Лицензия (BSD-3-Clause): [LICENSE](LICENSE)
+
+## Авторы и контрибьюторы / Contributors
+* **[@netanyahy](https://github.com/netanyahy)** — автор и мейнтейнер проекта
+* **Google Gemini** (`@gemini-code-assist`) — AI co-author (Antigravity)
